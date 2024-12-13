@@ -1,4 +1,7 @@
 import pygame
+import random
+import csv
+import os
 
 # Initialize Pygame
 pygame.init()
@@ -16,6 +19,9 @@ RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 YELLOW = (255, 255, 0)
 PURPLE = (128, 0, 128)
+
+# Create directories for outputs
+os.makedirs("data", exist_ok=True)
 
 # Function to generate room layout
 def generate_room_layout(room_names):
@@ -43,7 +49,7 @@ characters = {
 }
 
 # Function to draw the environment
-def draw_environment(step_num):
+def draw_environment(step_num, folder):
     screen.fill(WHITE)
     for room, rect in rooms.items():
         pygame.draw.rect(screen, BLACK, rect, 2)
@@ -74,41 +80,63 @@ def draw_environment(step_num):
         screen.blit(text, (position[0] - 25, position[1] - 30))
 
     # Save the current frame to a PNG
-    pygame.image.save(screen, f"../screenshots/step_{step_num:02d}.png")
+    pygame.image.save(screen, f"{folder}/step_{step_num:02d}.png")
 
-# Simulate movement
-def simulate_movement():
-    for step_num, (char, target_room) in enumerate(sequence, start=1):
-        characters[char]["room"] = target_room.lower()
-        draw_environment(step_num)
+# Generate random sequences and QA pairs
+def generate_random_sequences():
+    rooms_list = list(rooms.keys())
+    qa_data = []
+    for length in [2, 5, 10, 20, 25]:
+        for seq_id in range(100):
+            folder = f"data/length_{length}/sequence_{seq_id}"
+            os.makedirs(folder, exist_ok=True)
+            
+            for char in characters:
+                characters[char]["room"] = random.choice(rooms_list)
+
+            sequence = [(0, char, info["room"]) for char, info in characters.items()]
+
+            q_char = random.choice(list(characters.keys()))
+            a_room = characters[q_char]["room"]
+
+            for step in range(length):
+                char = random.choice(list(characters.keys()))
+                target_room = random.choice(list(set(rooms_list) - {characters[char]["room"]}))
+                a_room = target_room if char == q_char else a_room
+                sequence.append((step + 1, char, target_room))
+
+            with open(f"data/length_{length}/sequence_{seq_id}.csv", "w+", newline="") as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["Step", "Character", "Room"])
+                draw_environment(0, folder)
+                for step_num, char, target_room in sequence:
+                    characters[char]["room"] = target_room.lower()
+                    if step_num > 0:
+                        draw_environment(step_num, folder)
+                    writer.writerow([step_num, char, target_room])
+
+            # Generate a QA pair
+            question = f"Where was {q_char} last time?"
+            answer = f"{a_room}"
+            qa_data.append((f"length_{length}/sequence_{seq_id}", question, answer))
+
+    # Save QA pairs to a CSV file
+    with open("data/qa_pairs.csv", "w+", newline="") as qa_file:
+        writer = csv.writer(qa_file)
+        writer.writerow(["Seq_id", "Question", "Answer"])
+        writer.writerows(qa_data)
 
 if __name__ == "__main__":
-    # Movement sequence
-    sequence = [
-        ("Mary", "hallway"),
-        ("Michael", "garden"),
-        ("Sandra", "office"),
-        ("John", "hallway"),
-        ("John", "office"),
-        ("Sandra", "hallway"),
-        ("Daniel", "office"),
-        ("Mary", "office"),
-        ("Sandra", "office"),
-        ("Michael", "office"),
-    ]
-
     # Extract unique room names from the movement sequence
     room_names = ["kitchen", "bathroom", "garden", "office", "bedroom", "hallway"]
 
     # Generate room layout dynamically
     rooms = generate_room_layout(list(room_names))
-    
 
     # Initialize bins for each room
     bins = {}
 
-    # Main execution
-    draw_environment(0)  # Save initial state
-    simulate_movement()
+    # Generate random sequences and QA pairs
+    generate_random_sequences()
 
 pygame.quit()
