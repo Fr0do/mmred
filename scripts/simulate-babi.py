@@ -17,7 +17,7 @@ random.seed(1337)
 ################################################################################
 # Adaptive parameters: we define a default resolution and derive sizes from it #
 ################################################################################
-DEFAULT_WIDTH, DEFAULT_HEIGHT = 256, 256
+DEFAULT_WIDTH, DEFAULT_HEIGHT = 640, 480
 
 def init_pygame(width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
     """
@@ -74,8 +74,8 @@ def draw_environment(
     text_offset     = 1.5 * circle_radius  # how far above the circle text will appear
 
     # More crisp fonts (SysFont with bold=True if desired)
-    font_room = pygame.font.Font("ARIALBD.TTF", font_size_rooms)
-    font_char = pygame.font.Font("ARIAL.TTF", font_size_chars)
+    font_room = pygame.font.Font("fonts/ARIALBD.TTF", font_size_rooms)
+    font_char = pygame.font.Font("fonts/ARIAL.TTF", font_size_chars)
 
     # Draw rooms
     for room, rect in rooms.items():
