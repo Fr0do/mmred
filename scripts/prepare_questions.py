@@ -57,14 +57,14 @@ def generate_questions_and_answers(df):
             "Supporting_Steps": [step],
         }
 
-    def first_time_count_other_char():
+    def first_time_other_char():
         character = random.choice(characters)
         record = df[character].drop_duplicates(keep='first').sample(1)
         step, room = record.index[0], record.values[0]
         character_other = random.choice(list(set(characters) - {character}))
         room_other = df[character_other].iloc[step]
         return {
-            "Type": "first_time_count_other_char",
+            "Type": "first_time_other_char",
             "Question": f"What room was {character_other} in when {character} first entered {room}?",
             "Answer": room_other,
             "Supporting_Steps": [step],
@@ -94,14 +94,14 @@ def generate_questions_and_answers(df):
             "Supporting_Steps": [step],
         }
 
-    def last_time_count_other_char():
+    def last_time_other_char():
         character = random.choice(characters)
         record = df[character].drop_duplicates(keep='last').sample(1)
         step, room = record.index[0], record.values[0]
         character_other = random.choice(list(set(characters) - {character}))
         room_other = df[character_other].iloc[step]
         return {
-            "Type": "last_time_count_other_char",
+            "Type": "last_time_other_char",
             "Question": f"What room was {character_other} in when {character} first entered {room}?",
             "Answer": room_other,
             "Supporting_Steps": [step],
@@ -123,10 +123,10 @@ def generate_questions_and_answers(df):
     question_types = [
         first_time,
         first_time_count_other_room,
-        first_time_count_other_char,
+        first_time_other_char,
         last_time,
         last_time_count_other_room,
-        last_time_count_other_char,
+        last_time_other_char,
         count_visits,
     ]
 
