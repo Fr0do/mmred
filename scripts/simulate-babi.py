@@ -17,7 +17,7 @@ random.seed(1337)
 ################################################################################
 # Adaptive parameters: we define a default resolution and derive sizes from it #
 ################################################################################
-DEFAULT_WIDTH, DEFAULT_HEIGHT = 640, 480
+DEFAULT_WIDTH, DEFAULT_HEIGHT = 512, 512
 
 def init_pygame(width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT):
     """
@@ -39,7 +39,7 @@ def generate_room_layout(room_names, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT)
     }
     """
     cols = 3  # number of columns in the grid
-    margin = math.sqrt(DEFAULT_WIDTH * DEFAULT_HEIGHT) // 20
+    margin = math.sqrt(DEFAULT_WIDTH * DEFAULT_HEIGHT) // 10
     room_width = (width - (cols + 1) * margin) // cols
     room_height = (height - (len(room_names) // cols + 1) * margin) // (len(room_names) // cols)
 
@@ -71,7 +71,7 @@ def draw_environment(
     font_size_rooms = int(min(width, height) // 30)      # for room labels
     font_size_chars = int(min(width, height) // 34)      # for character labels
     circle_radius   = int(min(width, height) // 40)
-    text_offset     = 1.5 * circle_radius  # how far above the circle text will appear
+    text_offset     = 1.75 * circle_radius  # how far above the circle text will appear
 
     # More crisp fonts (SysFont with bold=True if desired)
     font_room = pygame.font.Font("fonts/ARIALBD.TTF", font_size_rooms)
@@ -104,6 +104,9 @@ def draw_environment(
         text_rect.center = (position[0], position[1] - text_offset)
         screen.blit(text, text_rect)
 
+    step_text = font_room.render(f"Step {step_num}", True, BLACK)
+    step_rect = step_text.get_rect(center=(width // 2, height - 30))
+    screen.blit(step_text, step_rect)
     # Save the result
     pygame.image.save(screen, os.path.join(folder, f"step_{step_num:03d}.png"))
 
@@ -208,8 +211,8 @@ def generate_random_sequences_parallel():
     os.makedirs(base_path, exist_ok=True)
 
     # list of lengths
-    lengths = [2]
-    num_sequences_per_length = 2
+    lengths = [128]
+    num_sequences_per_length = 100
 
     tasks = []
     for length in lengths:
