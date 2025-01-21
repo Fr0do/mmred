@@ -15,6 +15,7 @@ import pandas as pd
 
 # Define the Pydantic models
 room_names = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]
+people_names = ["No one", "Daniel", "Mary", "Michael", "Sandra", "John"]
 prefix = ""
 
 class RoomAnswer(BaseModel):
@@ -25,7 +26,13 @@ class NumberAnswer(BaseModel):
     reasoning: Optional[str]
     answer: NonNegativeInt
 
-schemas = {"room": RoomAnswer.model_json_schema(), "number": NumberAnswer.model_json_schema()}
+class PersonAnswer(BaseModel):
+    reasoning: Optional[str]
+    answer: List[Literal[*people_names]]
+
+schemas = {"room": RoomAnswer.model_json_schema(), "number": NumberAnswer.model_json_schema(), "person": PersonAnswer.model_json_schema()}
+
+person_types = {"most_time_in_room", "compare_adjacent_steps", "list_chars_in_room_at_step", "name_char_with_char_at_step"}
 
 async def process_qa_pair(qa: Dict, current_dir: str, client: AsyncOpenAI, model_name: str, semaphore: asyncio.Semaphore) -> Tuple[Dict, str]:
     image_urls = get_image_urls(qa, current_dir)
@@ -42,7 +49,10 @@ async def process_qa_pair(qa: Dict, current_dir: str, client: AsyncOpenAI, model
 
     async with semaphore:
         try:
-            answer_type = "room" if "count" not in qa['Type'] else "number"
+            if qa['Type'] not in person_types:
+                answer_type = "room" if "count" not in qa['Type'] else "number"
+            else:
+                answer_type = "person"
             response = await client.chat.completions.create(
                 model=model_name,
                 messages=messages,
@@ -56,7 +66,7 @@ async def process_qa_pair(qa: Dict, current_dir: str, client: AsyncOpenAI, model
             return (qa, f"Error: {e}")
 
 def get_image_urls(qa: Dict, current_dir: str) -> List[Dict]:
-    DATA_DIR = 'data/length_256'
+    DATA_DIR = 'data/length_128'
     sequence_dir = os.path.join(DATA_DIR, qa['Seq_id'])
     image_pattern = os.path.join(sequence_dir, 'step_*.png')
 
@@ -75,7 +85,7 @@ def get_image_urls(qa: Dict, current_dir: str) -> List[Dict]:
     return image_urls
 
 def read_csv(file_path: str) -> List[Dict]:
-    df = pd.read_csv(file_path).sort_values("N_steps")
+    df = pd.read_csv(file_path).sort_values(["N_steps", "Seq_id"])
     return df.to_dict("records")
 
 def get_completed_seq_ids(output_csv: str) -> List[str]:
@@ -156,7 +166,7 @@ def main():
     parser.add_argument('--port', type=str, default='8000', help='Port for the API')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Port for the API')
     parser.add_argument('--endpoint', type=str, default='/v1', help='Port for the API')
-    parser.add_argument('--qa_pairs_csv', type=str, default='data/test_data.csv', help='Path to the QA pairs CSV file')
+    parser.add_argument('--qa_pairs_csv', type=str, default='data/new_test_data.csv', help='Path to the QA pairs CSV file')
     parser.add_argument('--output_csv', type=str, default=argparse.SUPPRESS, help='Path to the output CSV file')
     parser.add_argument('--vllm', type=bool, action=argparse.BooleanOptionalAction, default=True, help='If server is vLLM')
     parser.add_argument('--semaphore_limit', type=int, default=16, help='Limit for concurrent requests')

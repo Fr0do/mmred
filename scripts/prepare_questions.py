@@ -2,7 +2,7 @@ import os
 import glob
 import random
 import pandas as pd
-from collections import defaultdict
+from tqdm.auto import tqdm
 import numpy as np
 
 
@@ -167,20 +167,15 @@ def generate_questions_and_answers(df):
         e.g. "Between step S and step S+1, which characters moved to a different room?"
         """
         # Pick a random step that has a "next" step
-        valid_steps = df.index[df.index < df.index[-1]]
-        if len(valid_steps) == 0:
+        if len(df.index) == 1:
             return {
-                "Type": "compare_adjacent_steps",
+                "Type": "compare_two_steps",
                 "Question": f"Which characters moved to a different room?",
                 "Answer": "No one",
                 "Supporting_Steps": [0],
             }
-        step = random.choice(valid_steps)
+        step, next_step = sorted(random.sample(df.index.tolist(), 2))
 
-        # Find the next step in the index (assuming consecutive steps)
-        step_idx = list(df.index)
-        next_step = step_idx[step_idx.index(step) + 1]
-        
         row_current = df.loc[step]
         row_next = df.loc[next_step]
 
@@ -191,8 +186,8 @@ def generate_questions_and_answers(df):
 
         answer = changed_chars if changed_chars else "No one"
         return {
-            "Type": "compare_adjacent_steps",
-            "Question": f"Between step {step} and step {next_step}, which characters moved to a different room?",
+            "Type": "compare_two_steps",
+            "Question": f"Comparing step {step} and step {next_step}, which characters moved to a different room?  List characters or answer 'No one'.",
             "Answer": answer,
             "Supporting_Steps": [int(step), int(next_step)],
         }
@@ -213,7 +208,7 @@ def generate_questions_and_answers(df):
         answer = chars_in_that_room if chars_in_that_room else "No one"
         return {
             "Type": "list_chars_in_room_at_step",
-            "Question": f"Who was in room {room_choice} at step {step}?",
+            "Question": f"Who was in room {room_choice} at step {step}? List characters or answer 'No one'.",
             "Answer": answer,
             "Supporting_Steps": [int(step)],
         }
@@ -239,7 +234,7 @@ def generate_questions_and_answers(df):
 
     def one_char_with_char_at_step():
         """
-        e.g. "Name one other character who was also in the same room as X at step S."
+        e.g. "Name any other character who was also in the same room as X at step S."
         """
         if len(df.index) == 0:
             return None
@@ -256,7 +251,7 @@ def generate_questions_and_answers(df):
             answer = random.choice(others)
         return {
             "Type": "name_char_with_char_at_step",
-            "Question": f"Name one other character who was in the same room as {char} at step {step}.",
+            "Question": f"Name any other character (or 'No one') who was in the same room as {char} at step {step}.",
             "Answer": answer,
             "Supporting_Steps": [int(step)],
         }
@@ -282,15 +277,15 @@ def generate_questions_and_answers(df):
         if not top_chars:
             return {
                 "Type": "most_time_in_room",
-                "Question": f"Which character spent the most time overall in room {room_choice}?",
+                "Question": f"Which character spent the most time (in steps) overall in room {room_choice}?",
                 "Answer": "No one",
-                "Supporting_Steps": [],
+                "Supporting_Steps": [-1],
             }
 
         answer_char = random.choice(top_chars)
         return {
             "Type": "most_time_in_room",
-            "Question": f"Which character spent the most time overall in room {room_choice}?",
+            "Question": f"Which character spent the most time (in steps) overall in room {room_choice}?",
             "Answer": answer_char,
             "Supporting_Steps": [-1],  # Could include all steps but might be large.
         }
@@ -322,16 +317,16 @@ def generate_questions_and_answers(df):
 
 def generate_all_sequences():
     # 1. Load all sequences
-    all_sequences = load_sequence_data(folder="data/length_32")
-
+    all_sequences = load_sequence_data(folder="data/length_128")
+    
     # 2. Step sizes
     step_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
 
     # We collect rows for output CSV
     output_rows = []
-    
+
     # 3. For each file, for each step size, generate Q&A
-    for file_name, df in all_sequences.items():
+    for file_name, df in tqdm(all_sequences.items()):
         seq_id = os.path.splitext(file_name)[0]  # e.g. "sequence_000"
 
         df_static = df.pivot(index="Step", columns="Character", values="Room").ffill()
