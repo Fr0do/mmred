@@ -66,10 +66,10 @@ def generate_questions_and_answers(df):
         record = df[character].drop_duplicates(keep='first').sample(1)
         step, room_entered = record.index[0], record.values[0]
         room_other = random.choice(rooms)
-        count_other = (df.iloc[step] == room_other).sum()
+        count_other = (df.loc[step] == room_other).sum()
         return {
             "Type": "first_appearance_room_count",
-            "Question": f"How many characters were in room {room_other} when {character} first appeared in room {room_entered}?",
+            "Question": f"How many characters were in {room_other} when {character} first appeared in {room_entered}?",
             "Answer": int(count_other),
             "Supporting_Steps": [int(step)],
         }
@@ -82,7 +82,7 @@ def generate_questions_and_answers(df):
         record = df[character].drop_duplicates(keep='first').sample(1)
         step, room = record.index[0], record.values[0]
         character_other = random.choice(list(set(characters) - {character}))
-        room_other_char = df[character_other].iloc[step]
+        room_other_char = df[character_other].loc[step]
         return {
             "Type": "first_appearance_other_char",
             "Question": f"In which room was {character_other} when {character} first appeared in {room}?",
@@ -96,7 +96,7 @@ def generate_questions_and_answers(df):
         Takes the last row for a random character.
         """
         character = random.choice(characters)
-        record = df.iloc[-1:][character]
+        record = df[character].iloc[-1:]
         step, room = record.index[0], record.values[0]
         return {
             "Type": "final_room",
@@ -115,10 +115,10 @@ def generate_questions_and_answers(df):
         record = df[character].drop_duplicates(keep='last').sample(1)
         step, room_entered = record.index[0], record.values[0]
         room_other = random.choice(rooms)
-        count_other = (df.iloc[step] == room_other).sum()
+        count_other = (df.loc[step] == room_other).sum()
         return {
             "Type": "final_room_count",
-            "Question": f"How many characters were in room {room_other} when {character} made their final appearance in {room_entered}?",
+            "Question": f"How many characters were in {room_other} when {character} made their final appearance in {room_entered}?",
             "Answer": int(count_other),
             "Supporting_Steps": [int(step)],
         }
@@ -131,7 +131,7 @@ def generate_questions_and_answers(df):
         record = df[character].drop_duplicates(keep='last').sample(1)
         step, room = record.index[0], record.values[0]
         character_other = random.choice(list(set(characters) - {character}))
-        room_other_char = df[character_other].iloc[step]
+        room_other_char = df.loc[step][character_other]
         return {
             "Type": "final_appearance_other_char",
             "Question": f"In which room was {character_other} when {character} made their final appearance in {room}?",
@@ -171,8 +171,8 @@ def generate_questions_and_answers(df):
             return {
                 "Type": "compare_two_steps",
                 "Question": f"Which characters moved to a different room?",
-                "Answer": "No one",
-                "Supporting_Steps": [0],
+                "Answer": "Nobody",
+                "Supporting_Steps": [1],
             }
         step, next_step = sorted(random.sample(df.index.tolist(), 2))
 
@@ -184,10 +184,10 @@ def generate_questions_and_answers(df):
             if row_current[char] != row_next[char]:
                 changed_chars.append(char)
 
-        answer = changed_chars if changed_chars else "No one"
+        answer = changed_chars if changed_chars else "Nobody"
         return {
             "Type": "compare_two_steps",
-            "Question": f"Comparing step {step} and step {next_step}, which characters moved to a different room?  List characters or answer 'No one'.",
+            "Question": f"Comparing step {step} and step {next_step}, which characters moved to a different room?  List characters or answer 'Nobody'.",
             "Answer": answer,
             "Supporting_Steps": [int(step), int(next_step)],
         }
@@ -205,10 +205,10 @@ def generate_questions_and_answers(df):
         # find which characters are in that room
         chars_in_that_room = row[row == room_choice].index.tolist()
 
-        answer = chars_in_that_room if chars_in_that_room else "No one"
+        answer = chars_in_that_room if chars_in_that_room else "Nobody"
         return {
             "Type": "list_chars_in_room_at_step",
-            "Question": f"Who was in room {room_choice} at step {step}? List characters or answer 'No one'.",
+            "Question": f"Who was in room {room_choice} at step {step}? List characters or answer 'Nobody'.",
             "Answer": answer,
             "Supporting_Steps": [int(step)],
         }
@@ -246,12 +246,12 @@ def generate_questions_and_answers(df):
         # find other characters in the same room
         others = [c for c in characters if c != char and row[c] == room_of_char]
         if not others:
-            answer = "No one"
+            answer = "Nobody"
         else:
             answer = random.choice(others)
         return {
             "Type": "name_char_with_char_at_step",
-            "Question": f"Name any other character (or 'No one') who was in the same room as {char} at step {step}.",
+            "Question": f"List other characters who were in the same room as {char} at step {step} or answer 'Nobody'.",
             "Answer": answer,
             "Supporting_Steps": [int(step)],
         }
@@ -277,15 +277,15 @@ def generate_questions_and_answers(df):
         if not top_chars:
             return {
                 "Type": "most_time_in_room",
-                "Question": f"Which character spent the most time (in steps) overall in room {room_choice}?",
-                "Answer": "No one",
+                "Question": f"Which character spent the most time (seen in the most steps) overall in room {room_choice}?",
+                "Answer": "Nobody",
                 "Supporting_Steps": [-1],
             }
 
         answer_char = random.choice(top_chars)
         return {
             "Type": "most_time_in_room",
-            "Question": f"Which character spent the most time (in steps) overall in room {room_choice}?",
+            "Question": f"Which character spent the most time (seen in the most steps) overall in room {room_choice}?",
             "Answer": answer_char,
             "Supporting_Steps": [-1],  # Could include all steps but might be large.
         }
@@ -331,7 +331,7 @@ def generate_all_sequences():
 
         df_static = df.pivot(index="Step", columns="Character", values="Room").ffill()
         for sz in step_sizes:
-            truncated_df = df_static.iloc[df_static.index < sz]
+            truncated_df = df_static[df_static.index <= sz]
             qa_list = generate_questions_and_answers(truncated_df)
             
             for qa in qa_list:
