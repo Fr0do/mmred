@@ -176,13 +176,13 @@ def process_sequence(args):
         writer = csv.writer(csvfile)
         writer.writerow(["Step", "Character", "Room"])
 
-        # Draw initial state (step = 0)
-        draw_environment(screen, rooms, bins, characters, 0, folder)
+        # Draw initial state (step = 1)
+        draw_environment(screen, rooms, bins, characters, 1, folder)
         for char in characters:
-            writer.writerow([0, char, characters[char]["room"]])
+            writer.writerow([1, char, characters[char]["room"]])
 
         # Generate random movements
-        for step in range(1, length):
+        for step in range(2, length + 1):
             char = random.choice(list(characters.keys()))
             current_room = characters[char]["room"]
             # choose a new room different from the current one
