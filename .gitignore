@@ -169,5 +169,5 @@ cython_debug/
 
 .DS_Store
 
-data
+data/*.csv
 results

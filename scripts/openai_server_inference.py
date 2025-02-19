@@ -3,42 +3,47 @@
 
 import argparse
 import asyncio
-import csv
-import glob
-import os
-from typing import List, Dict, Tuple, Union
-from openai import AsyncOpenAI
-from pydantic import BaseModel, NonNegativeInt, constr
-from typing import Literal, Optional, Set
-from tqdm.asyncio import tqdm_asyncio
-import pandas as pd
-from io import BytesIO
-from PIL import Image
 import base64
-import requests
+import csv
+import json
+import os
+from pathlib import Path
 
-# Define the Pydantic models
-room_names = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]
-people_names = ["Nobody", "Daniel", "Mary", "Michael", "Sandra", "John"]
+import requests
+from io import BytesIO
+from typing import List, Dict, Tuple, Union, Literal, Optional
+
+import pandas as pd
+from openai import AsyncOpenAI
+from PIL import Image
+from pydantic import BaseModel
+from tqdm.asyncio import tqdm_asyncio
+
+from qgen.const import ROOMS, CHARS, NOBODY, SEQ_LENGTHS, AnswerTypePerson, AnswerTypeRoom, AnswerTypeNumber
+
 
 class RoomAnswer(BaseModel):
     reasoning: Optional[str] = None
-    answer: Literal[*room_names]
+    answer: Literal[*ROOMS]
+
 
 class NumberAnswer(BaseModel):
     reasoning: Optional[str] = None
     answer: int = 0
 
+
 class PersonAnswer(BaseModel):
     reasoning: Optional[str] = None
-    answer: Set[Literal[*people_names]] = {"Nobody"}
+    answer: Literal[*CHARS, NOBODY] = NOBODY
 
-schemas = {"room": RoomAnswer.model_json_schema(), "number": NumberAnswer.model_json_schema(), "person": PersonAnswer.model_json_schema()}
 
-person_types = {"most_time_in_room", "compare_two_steps", "list_chars_in_room_at_step", "name_char_with_char_at_step"}
+schemas = {
+    AnswerTypeRoom: RoomAnswer.model_json_schema(),
+    AnswerTypeNumber: NumberAnswer.model_json_schema(),
+    AnswerTypePerson: PersonAnswer.model_json_schema(),
+}
 
-SYSTEM_PROMPT = """
-You are an assistant that analyzes image sequences.
+SYSTEM_PROMPT = """You are an assistant that analyzes image sequences.
 Format your response as follows:
 {
     "reasoning": Optional[str], # Your short explanation of answer, skip it if the answer is trivial
@@ -47,15 +52,14 @@ Format your response as follows:
 
 Where <value> is:
 - A **single room name** (e.g., "Kitchen") for location answers.
-- A **number** (e.g., "3") for count answers.
-- A **set of names** (e.g., ["Michael"], ["Daniel", "Sandra"] or or ["Nobody"] if set should be empty) for people answers.
-"""
+- A **number** (e.g., "3") for counting answers.
+- A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions."""
 
 
 def encode_image_base64(image: Union[str, Image.Image]) -> str:
     """encode raw date to base64 format."""
     buffered = BytesIO()
-    FETCH_TIMEOUT = 10
+    fetch_timeout = 10
     headers = {
         'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -65,7 +69,7 @@ def encode_image_base64(image: Union[str, Image.Image]) -> str:
         if isinstance(image, str):
             url_or_path = image
             if url_or_path.startswith('http'):
-                response = requests.get(url_or_path, headers=headers, timeout=FETCH_TIMEOUT)
+                response = requests.get(url_or_path, headers=headers, timeout=fetch_timeout)
                 response.raise_for_status()
                 buffered.write(response.content)
             elif os.path.exists(url_or_path):
@@ -84,47 +88,31 @@ def encode_image_base64(image: Union[str, Image.Image]) -> str:
     return res
 
 
-def get_image_urls(qa: Dict, current_dir: str) -> List[Dict]:
-    DATA_DIR = 'data/length_128'
-    sequence_dir = os.path.join(DATA_DIR, qa['Seq_id'])
-    image_pattern = os.path.join(sequence_dir, 'step_*.png')
-
-    image_paths = sorted(glob.glob(image_pattern))
-
-    if len(image_paths):
-        image_paths = image_paths[:int(qa['N_steps'])]
-
-    image_urls = []
-    for path in image_paths:
-        relative_path = os.path.relpath(path, current_dir)
-        file_url = relative_path.replace(os.sep, "/")
-        file_url =  os.path.abspath(relative_path)
-        image_urls.append({'image_url': {'url': f"data:image/png;base64,{encode_image_base64(file_url)}"}})
-    return image_urls
+def get_image_urls(row: pd.Series, data_path: Path) -> List[Dict]:
+    video_path = data_path / f"len_{row['seq_len']}" / "videos" / f"vid_{row['qid']}"
+    image_paths = sorted(video_path.glob('frame_*.png'))
+    return [{'image_url': {'url': f"data:image/png;base64,{encode_image_base64(str(p))}"}} for p in image_paths]
 
 
-async def process_qa_pair(qa: Dict, current_dir: str, client: AsyncOpenAI, model_name: str, semaphore: asyncio.Semaphore) -> Tuple[Dict, str]:
-    image_urls = get_image_urls(qa, current_dir)
+async def process_row(row: pd.Series, data_path: Path,  # qa: Dict
+                      client: AsyncOpenAI, model_name: str, semaphore: asyncio.Semaphore) -> Tuple[Dict, str]:
+    image_urls = get_image_urls(row, data_path)
     if not image_urls:
-        return (qa, "No images found for the given sequence.")
-    user_content = [url | {"type": "image_url"} for url in image_urls] + [{'type': 'text', 'text': qa['Question']}]
+        return row.to_dict(), "Error: No images found for the given sequence"
+
+    user_content = [url | {'type': 'image_url'} for url in image_urls] + [{'type': 'text', 'text': row['question']}]
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_content}
+        {"role": "user", "content": user_content},
     ]
 
     async with semaphore:
         try:
-            if qa['Type'] in person_types:
-                answer_type = "person"
-            else:
-                answer_type = "number" if "count" in qa['Type'] else "room"
-            extra_body = {
-                "repetition_penalty": 1.15, "guided_json": schemas[answer_type], 
-                "guided_decoding_backend": "outlines"
-            }
+            extra_body = {'repetition_penalty': 1.15, 'guided_json': schemas[row['atype']],
+                          'guided_decoding_backend': 'outlines'}
             if "Aria" in model_name: 
                 extra_body |= {"stop_token_ids": [1970, 93653]}
+
             response = await client.chat.completions.create(
                 model=model_name,
                 messages=messages,
@@ -133,17 +121,45 @@ async def process_qa_pair(qa: Dict, current_dir: str, client: AsyncOpenAI, model
                 extra_body=extra_body,
             )
             answer = response.choices[0].message.content
-            return (qa, answer)
+            return row.to_dict(), answer
+
         except Exception as e:
-            return (qa, f"Error: {e}")
+            return row.to_dict(), f'Error: {e}'
 
 
-def read_csv(file_path: str) -> List[Dict]:
-    df = pd.read_csv(file_path).sort_values(["N_steps", "Seq_id"])
-    return df.to_dict("records")
+async def process_dataset(dataset: pd.DataFrame, data_path: Path, output_csv: str,
+                          client: AsyncOpenAI, model_name: str, semaphore_limit: int = 10):
+    semaphore = asyncio.Semaphore(semaphore_limit)
+
+    with open(output_csv, mode='a+', encoding='utf-8', newline='') as f_out:
+        fieldnames = dataset.columns.tolist() + ['Predicted_Answer']
+        writer = csv.DictWriter(f_out, fieldnames=fieldnames)
+        if not os.path.getsize(output_csv):
+            writer.writeheader()
+
+    tasks = []
+    for _, row in dataset.iterrows():
+        task = asyncio.create_task(process_row(row, data_path, client, model_name, semaphore))
+        tasks.append(task)
+
+    for coro in tqdm_asyncio.as_completed(tasks, position=hash(str(client.base_url)) % 10,
+                                          total=len(tasks), desc="Processing QA pairs"):
+        qa_data, predicted_answer = await coro
+        with open(output_csv, mode='a+', encoding='utf-8', newline='') as f_out:
+            writer = csv.DictWriter(f_out, fieldnames=fieldnames)
+            writer.writerow(qa_data | {'Predicted_Answer': predicted_answer})
 
 
-def get_completed_seq_ids(output_csv: str) -> List[str]:
+def _load_dataset(data_path: Path):
+    dataset = []
+    for seq_len in SEQ_LENGTHS:
+        with open(str(data_path / f'len_{seq_len}' / 'questions.json'), 'r') as file:
+            dataset_l = json.load(file)
+        dataset += dataset_l
+    return pd.DataFrame.from_records(dataset, index='qid')
+
+
+def _get_completed_qids(output_csv: str) -> List[str]:
     completed_seq_ids = []
     if not os.path.exists(output_csv):
         return completed_seq_ids
@@ -151,33 +167,11 @@ def get_completed_seq_ids(output_csv: str) -> List[str]:
         reader = csv.DictReader(f)
         for row in reader:
             if 'error' not in row['Predicted_Answer'].lower():
-                completed_seq_ids.append(f"{row['Seq_id']}/{row['N_steps']}/{row['Type']}")
+                completed_seq_ids.append(row['qid'])
     return completed_seq_ids
 
 
-async def process_all_qa_pairs(qa_pairs: List[Dict], current_dir: str, output_csv: str, client: AsyncOpenAI, model_name: str, semaphore_limit: int = 10):
-    semaphore = asyncio.Semaphore(semaphore_limit)
-
-    with open(output_csv, mode='a+', encoding='utf-8', newline='') as f_out:
-        fieldnames = list(qa_pairs[0].keys()) + ['Predicted_Answer']
-        writer = csv.DictWriter(f_out, fieldnames=fieldnames)
-        if not os.path.getsize(output_csv):
-            writer.writeheader()
-
-    tasks = []
-    for qa_pair in qa_pairs:
-        task = asyncio.create_task(process_qa_pair(qa_pair, current_dir, client, model_name, semaphore))
-        tasks.append(task)
-
-    for coro in tqdm_asyncio.as_completed(tasks, position=hash(str(client.base_url)) % 10, total=len(tasks), desc="Processing QA Pairs"):
-        qa_data, predicted_answer = await coro
-        with open(output_csv, mode='a+', encoding='utf-8', newline='') as f_out:
-            writer = csv.DictWriter(f_out, fieldnames=fieldnames)
-            writer.writerow(qa_data | {'Predicted_Answer': predicted_answer})
-
-
 async def main_async(args):
-    CURRENT_DIR = os.getcwd()
 
     if "base_url" not in args:
         args.base_url = f"http://{args.host}:{args.port}{args.endpoint}"
@@ -196,21 +190,24 @@ async def main_async(args):
         model_format = "_".join(model_name.split("/"))
         args.output_csv = os.path.join('data', f'qa_pairs_answers_{model_format}.csv')
         os.environ['OUTLINES_CACHE_DIR'] = f"/tmp/outlines_{model_format}"
+
     # Step 1: Read all QA pairs synchronously
-    qa_pairs = read_csv(args.qa_pairs_csv)
-    print(f"Total QA pairs to process: {len(qa_pairs)}")
+    data_path = Path(args.data_path) / args.exp_name
+    dataset = _load_dataset(data_path)
+    print(f"Total QA pairs to process: {len(dataset)}")
 
     # Step 2: Check for already completed QA pairs and filter them out
-    completed_seq_ids = get_completed_seq_ids(args.output_csv)
-    print(f"Already processed {len(completed_seq_ids)} QA pairs.")
+    completed_qids = _get_completed_qids(args.output_csv)
+    print(f"Already processed {len(completed_qids)} QA pairs.")
 
-    qa_pairs_remaining = [pair for pair in qa_pairs if f"{pair['Seq_id']}/{pair['N_steps']}/{pair['Type']}" not in completed_seq_ids]
-    print(f"QA pairs remaining to process: {len(qa_pairs_remaining)}")
+    remaining_qids = sorted(set(dataset.index.tolist()) - set(completed_qids))
+    print(f"QA pairs remaining to process: {len(remaining_qids)}")
+    remaining_dataset = dataset.iloc[remaining_qids].reset_index()
 
     # Step 3: Process remaining QA pairs asynchronously with intermediate storage
-    if qa_pairs_remaining:
+    if remaining_qids:
         print(f"Writing output to {args.output_csv}")
-        await process_all_qa_pairs(qa_pairs_remaining, CURRENT_DIR, args.output_csv, client, model_name, args.semaphore_limit)
+        await process_dataset(remaining_dataset, data_path, args.output_csv, client, model_name, args.semaphore_limit)
         print(f"Processing complete. Answers have been written to {args.output_csv}")
     else:
         print("No QA pairs remaining to process.")
@@ -223,14 +220,18 @@ def main():
     parser.add_argument('--port', type=str, default='8000', help='Port for the API')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='Port for the API')
     parser.add_argument('--endpoint', type=str, default='/v1', help='Port for the API')
-    parser.add_argument('--qa_pairs_csv', type=str, default='data/new_test_data.csv', help='Path to the QA pairs CSV file')
+    parser.add_argument('--data_path', type=str, default='/home/jovyan/shares/SR004.nfs2/data/long_vqa_synth',
+                        help='Path to synthetic dataset')
+    parser.add_argument('--exp_name', type=str, default='main', help='Experiment name')
     parser.add_argument('--output_csv', type=str, default=argparse.SUPPRESS, help='Path to the output CSV file')
-    parser.add_argument('--vllm', type=bool, action=argparse.BooleanOptionalAction, default=True, help='If server is vLLM')
+    parser.add_argument('--vllm', type=bool, action=argparse.BooleanOptionalAction, default=True,
+                        help='If server is vLLM')
     parser.add_argument('--semaphore_limit', type=int, default=16, help='Limit for concurrent requests')
     args = parser.parse_args()
 
     # Run the async main function
     asyncio.run(main_async(args))
+
 
 if __name__ == "__main__":
     main()
