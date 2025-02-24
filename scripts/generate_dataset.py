@@ -20,9 +20,19 @@ def create_exp_structure(base_path, exp_name):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Generate experiment folder structure.')
-    parser.add_argument('--base_path', type=str, required=True, help='Base path for the experiment.')
-    parser.add_argument('--exp_name', type=str, required=False, default='main', help='Name of the experiment.')
+    parser = argparse.ArgumentParser(
+        description="Generate experiment folder structure."
+    )
+    parser.add_argument(
+        "--base_path", type=str, required=True, help="Base path for the experiment."
+    )
+    parser.add_argument(
+        "--exp_name",
+        type=str,
+        required=False,
+        default="main",
+        help="Name of the experiment.",
+    )
     args = parser.parse_args()
 
     create_exp_structure(args.base_path, args.exp_name)

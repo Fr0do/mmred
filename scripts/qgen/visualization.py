@@ -16,7 +16,10 @@ def frame2png(row, frame_number, video_path):
 
     # Character settings: name, color (RGB), relative position (x, y)
     positions = [(0.25, 0.8), (0.75, 0.8), (0.25, 0.25), (0.75, 0.25), (0.5, 0.5)]
-    characters = [(char, color, position) for char, color, position in zip(CHARS, COLORS, positions)]
+    characters = [
+        (char, color, position)
+        for char, color, position in zip(CHARS, COLORS, positions)
+    ]
 
     # Allocation of squares for each character
     allocations = row.values.tolist()
@@ -39,13 +42,27 @@ def frame2png(row, frame_number, video_path):
             y = (rows - 1 - i) * (rect_height + padding)
 
             # Draw rectangle
-            square = plt.Rectangle((x, y), rect_width, rect_height, fill=None, edgecolor='black', linewidth=2)
+            square = plt.Rectangle(
+                (x, y),
+                rect_width,
+                rect_height,
+                fill=None,
+                edgecolor="black",
+                linewidth=2,
+            )
             ax.add_patch(square)
 
             # Add label in the bottom-left corner of the rectangle
             label_index = i * cols + j
-            plt.text(x + 0.02, y + 0.02, labels[label_index],
-                     horizontalalignment='left', verticalalignment='bottom', fontweight='bold', fontsize=14)
+            plt.text(
+                x + 0.02,
+                y + 0.02,
+                labels[label_index],
+                horizontalalignment="left",
+                verticalalignment="bottom",
+                fontweight="bold",
+                fontsize=14,
+            )
 
             # Store coordinates of the bottom-left rectangle
             if i == (rows - 1) and j == 0:
@@ -68,25 +85,38 @@ def frame2png(row, frame_number, video_path):
         char_y = y + relative_pos[1] * rect_height
 
         # Plot the character as a dot
-        ax.plot(char_x, char_y, 'o', color=[c / 255 for c in color], markersize=16)
+        ax.plot(char_x, char_y, "o", color=[c / 255 for c in color], markersize=16)
 
         # Add the character's name above the dot
-        plt.text(char_x, char_y + 0.08, name,
-                 horizontalalignment='center', verticalalignment='bottom', fontweight='bold', fontsize=12)
+        plt.text(
+            char_x,
+            char_y + 0.08,
+            name,
+            horizontalalignment="center",
+            verticalalignment="bottom",
+            fontweight="bold",
+            fontsize=12,
+        )
 
     # Add the frame number below the bottom-left rectangle
-    plt.text(bottom_left_x + rect_width * 1.5 + padding, bottom_left_y - 0.08,
-             f"Step {frame_number}",
-             horizontalalignment='center', verticalalignment='top', fontweight='bold', fontsize=14)
+    plt.text(
+        bottom_left_x + rect_width * 1.5 + padding,
+        bottom_left_y - 0.08,
+        f"Step {frame_number}",
+        horizontalalignment="center",
+        verticalalignment="top",
+        fontweight="bold",
+        fontsize=14,
+    )
 
     # Adjust plot limits and aesthetics
-    ax.set_xlim(- 0.2 * padding, cols * (rect_width + padding) - 0.8 * padding)
-    ax.set_ylim(- 0.2 * padding, rows * (rect_height + padding) - 0.8 * padding)
-    ax.set_aspect('auto')
-    ax.axis('off')
+    ax.set_xlim(-0.2 * padding, cols * (rect_width + padding) - 0.8 * padding)
+    ax.set_ylim(-0.2 * padding, rows * (rect_height + padding) - 0.8 * padding)
+    ax.set_aspect("auto")
+    ax.axis("off")
 
     # Show the plot
     # plt.show()
     plt.tight_layout()
-    fig.savefig(video_path / f'frame_{frame_number:04d}.png')
+    fig.savefig(video_path / f"frame_{frame_number:04d}.png")
     plt.close(fig)
