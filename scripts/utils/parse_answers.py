@@ -2,6 +2,7 @@ import pandas as pd
 import json
 import os
 import re
+import glob
 from ast import literal_eval
 from pydantic import BaseModel, ValidationError
 from typing import Optional, Set, Literal, Iterable
@@ -103,23 +104,8 @@ def validate_and_compare(row):
 
 
 # Paths to answer files
-answers = [
-    "data/qa_pairs_answers_Qwen_Qwen2-VL-2B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2-VL-7B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2-VL-72B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2.5-VL-3B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2.5-VL-7B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2.5-VL-72B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2.5-7B-Instruct.csv",
-    "data/qa_pairs_answers_Qwen_Qwen2.5-72B-Instruct.csv",
-    "data/qa_pairs_answers_OpenGVLab_InternVL2_5-4B.csv",
-    "data/qa_pairs_answers_OpenGVLab_InternVL2_5-4B-MPO.csv",
-    "data/qa_pairs_answers_OpenGVLab_InternVL2_5-8B-MPO.csv",
-    "data/qa_pairs_answers_OpenGVLab_InternVL2_5-8B.csv",
-    "data/qa_pairs_answers_OpenGVLab_InternVL2_5-78B-MPO.csv",
-    "data/qa_pairs_answers_OpenGVLab_InternVL2_5-78B.csv",
-    "data/qa_pairs_answers_rhymes-ai_Aria.csv",
-]
+exp_name = "main_1mv"
+answers = glob.glob(f"data/{exp_name}/qa_pairs_answers_*")
 
 heatmap_data = []
 all_answers = []
@@ -142,6 +128,7 @@ for path in answers:
     df_answers = df_answers[
         ~df_answers["Predicted_Answer"].str.lower().str.contains("error", na=True)
     ]
+    print(f"Using {df_answers.shape[0]} answers")
     parsed_answers = []
     for index, row in df_answers.iterrows():
         try:
@@ -165,7 +152,7 @@ for path in answers:
     df_answers["hit"] = df_answers.apply(validate_and_compare, axis=1).astype(int)
     model_name = "/".join(path.split("answers_")[-1].split(".csv")[0].split("_", 1))
     df_answers["model"] = model_name
-    all_answers.append(df_answers)
+    # all_answers.append(df_answers)
     hit_rate = (
         df_answers.groupby(["seq_len", "qtype"])["hit"]
         .mean()
@@ -176,8 +163,8 @@ for path in answers:
     heatmap_data.append(hit_rate.set_index(["model"], append=True))
 
 heatmap_data = pd.concat(heatmap_data)
-all_answers = pd.concat(all_answers)
+# all_answers = pd.concat(all_answers)
 heatmap_data["hit"] = (heatmap_data["hit"].fillna(0) * 100).round(3)
 
 # Save the results
-heatmap_data.to_csv("results/newest_results.csv")
+heatmap_data.to_csv(f"results/{exp_name}_newest_results.csv")

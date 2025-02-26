@@ -2,19 +2,21 @@
 # Start the script in its own process group
 set -m
 
-ARGS="--data_path /home/jovyan/shares/SR004.nfs2/data/long_vqa_synth/main_1mv"
-
+ARGS="--data_path /workspace-SR004.nfs2/data/long_vqa_synth/ --exp_name main --semaphore_limit 16 --batch_size 300"
+TEXT1_ARGS="--text_json_path /workspace-SR004.nfs2/data/long_vqa_synth/main_1mv/all_text_serialized_questions.json --exp_name main_1mv"
+TEXT_ARGS="--text_json_path /workspace-SR004.nfs2/data/long_vqa_synth/main/all_text_serialized_questions.json  --exp_name main"
 (
-    python scripts/openai_server_inference.py --port 8023 $ARGS &
-    python scripts/openai_server_inference.py --port 8025 $ARGS &
-    python scripts/openai_server_inference.py --port 8020 --text_json_path /home/jovyan/shares/SR004.nfs2/abdullaeva/video-llm/Video-bAbI/long-vqa-v1/data/all_text_serialized_questions.json &
-    python scripts/openai_server_inference.py --port 8007 $ARGS &
-    # python scripts/openai_server_inference.py --port 8004 $ARGS &
-    # python scripts/openai_server_inference.py --port 8005 $ARGS &
-    # python scripts/openai_server_inference.py --port 8006 &
-    # python scripts/openai_server_inference.py --port 8007 &
-    # python scripts/openai_server_inference.py --port 8008 &
-    # python scripts/openai_server_inference.py --port 8009 &
+    python scripts/openai_server_inference.py --port 8003 $TEXT1_ARGS &
+    python scripts/openai_server_inference.py --port 8003 $TEXT_ARGS &
+    # python scripts/openai_server_inference.py --port 8002 $TEXT_ARGS &
+    # python scripts/openai_server_inference.py --port 8003 $TEXT_ARGS &
+    # python scripts/openai_server_inference.py --port 8014 $ARGS &
+    # python scripts/openai_server_inference.py --port 8013 $ARGS &
+    # python scripts/openai_server_inference.py --port 8011 $ARGS &
+    # python scripts/openai_server_inference.py --port 8011 $ARGS &
+    python scripts/openai_server_inference.py --port 8016 $ARGS &
+    # python scripts/openai_server_inference.py --port 8024 $ARGS &
+    # python scripts/openai_server_inference.py --port 8025 $ARGS &
     wait
 ) &
 

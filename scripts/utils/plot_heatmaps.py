@@ -93,7 +93,7 @@ def generate_heatmaps(heatmap_data, output_dir):
     plot_heatmap(
         mean_all_models,
         xlabel="Type of question",
-        ylabel="Images in context",
+        ylabel="Frames in context",
         title="Mean of all models",
         output_path=os.path.join(output_dir, "mmlong_all_models.png"),
         cmap=custom_cmap,
@@ -156,8 +156,9 @@ def generate_heatmaps(heatmap_data, output_dir):
 
 
 if __name__ == "__main__":
-    data_path = "results/newest_results.csv"
-    output_directory = "results"
+    exp_name = "main_1mv"
+    data_path = f"results/{exp_name}_newest_results.csv"
+    output_directory = f"results/{exp_name}"
 
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)

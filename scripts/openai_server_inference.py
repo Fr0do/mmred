@@ -17,6 +17,7 @@ import base64
 import requests
 from pydantic import BaseModel
 from tqdm.asyncio import tqdm_asyncio
+import hashlib
 
 from qgen.const import (
     ROOMS,
@@ -115,46 +116,109 @@ async def process_row(
     model_name: str,
     semaphore: asyncio.Semaphore,
     use_text_input: bool,
+    timeout: int = 600,  # Add timeout parameter
+    max_retries: int = 2  # Add retry parameter
 ) -> Tuple[Dict, str]:
+    # Prepare the content based on input type
     if use_text_input:
         user_content = [{"type": "text", "text": get_text_sequence(row)}]
-        row = row.drop("sequence_json")
+        row_dict = row.drop("sequence_json").to_dict()
     else:
-        image_urls = get_image_urls(row, data_path)
-        if not image_urls:
-            return row.to_dict(), "Error: No images found for the given sequence"
-        sequence = [url | {"type": "image_url"} for url in image_urls]
-        user_content = sequence + [{"type": "text", "text": row["question"]}]
+        try:
+            image_urls = get_image_urls(row, data_path)
+            if not image_urls:
+                return row.to_dict(), "Error: No images found for the given sequence"
+            sequence = [url | {"type": "image_url"} for url in image_urls]
+            user_content = sequence + [{"type": "text", "text": row["question"]}]
+            row_dict = row.to_dict()
+        except Exception as e:
+            return row.to_dict(), f"Error preparing images: {str(e)}"
+
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
 
-    async with semaphore:
-        try:
-            extra_body = {
-                "repetition_penalty": 1.1,
-                "guided_json": schemas[row["atype"]],
-                "guided_decoding_backend": "outlines",
-            }
-            if "Aria" in model_name:
-                extra_body |= {
-                    "stop_token_ids": [93532, 93653, 944, 93421, 1019, 93653, 93519]
-                }
+    # Prepare extra body parameters
+    extra_body = {
+        "repetition_penalty": 1.1,
+        "min_p" : 0.1,
+    }
+    
+    if row.get("atype") in schemas:
+        extra_body.update({
+            "guided_json": schemas[row["atype"]],
+            "guided_decoding_backend": "outlines",
+        })
+        
+    if "Aria" in model_name:
+        extra_body.update({
+            "stop_token_ids": [93532, 93653, 944, 93421, 1019, 93653, 93519]
+        })
 
+    # Use semaphore for rate limiting
+    async with semaphore:
+        retry_count = 0
+        while retry_count <= max_retries:
+            try:
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=0.0, # 2.0 for thinking
+                        max_completion_tokens=50, # 1024 for thinking
+                        extra_body=extra_body,
+                    ),
+                    timeout=timeout
+                )
+                answer = response.choices[0].message.content
+                return row_dict, answer
+            
+            except asyncio.TimeoutError:
+                retry_count += 1
+                if retry_count <= max_retries:
+                    wait_time = 2 ** retry_count  # Exponential backoff
+                    print(f"Request for qid={row.get('qid', 'unknown')} timed out. Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    return row_dict, "Error: Request timed out after multiple attempts"
+                    
+            except Exception as e:
+                retry_count += 1
+                if retry_count <= max_retries:
+                    wait_time = 2 ** retry_count
+                    print(f"Error for qid={row.get('qid', 'unknown')}: {e}. Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    return row_dict, f"Error after {max_retries} retries: {str(e)}"
+
+async def test_connection(client: AsyncOpenAI, model_name: str, max_retries: int = 3, backoff_factor: float = 1.5):
+    """Test the API connection and model availability with retries and backoff."""
+    dummy_messages = [
+        {"role": "system", "content": "Your only purpose is to answer 'hello world' to any message."},
+        {"role": "user", "content": "Who are you?"},
+    ]
+    
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            print(f"Testing connection to model {model_name}... (attempt {retry_count+1})")
             response = await client.chat.completions.create(
                 model=model_name,
-                messages=messages,
-                temperature=0.0,
+                messages=dummy_messages,
                 max_completion_tokens=25,
-                extra_body=extra_body,
+                timeout=30  # Add a timeout to prevent hanging
             )
-            answer = response.choices[0].message.content
-            return row.to_dict(), answer
-
+            print(f"Connection successful. Response: {response.choices[0].message.content}")
+            return True
         except Exception as e:
-            return row.to_dict(), f"Error: {e}"
-
+            retry_count += 1
+            wait_time = backoff_factor ** retry_count
+            print(f"Connection test failed: {e}. Retrying in {wait_time:.1f} seconds...")
+            await asyncio.sleep(wait_time)
+    
+    print("Failed to establish connection after maximum retries.")
+    return False
 
 async def process_dataset(
     dataset: pd.DataFrame,
@@ -164,32 +228,60 @@ async def process_dataset(
     model_name: str,
     semaphore_limit: int = 10,
     use_text_input: bool = False,
+    batch_size: int = 128,
 ):
+    import hashlib  # Add import at the top of the function
+    
     semaphore = asyncio.Semaphore(semaphore_limit)
-
+    # batch_size = min(batch_size, semaphore_limit)
+    
+    # Ensure output file exists with headers
     with open(output_csv, mode="a+", encoding="utf-8", newline="") as f_out:
         fieldnames = dataset.columns.tolist() + ["Predicted_Answer"]
         writer = csv.DictWriter(f_out, fieldnames=fieldnames)
-        if not os.path.getsize(output_csv):
+        if os.path.getsize(output_csv) == 0:
             writer.writeheader()
-
-    tasks = []
-    for _, row in dataset.iterrows():
-        task = asyncio.create_task(
-            process_row(row, data_path, client, model_name, semaphore, use_text_input)
-        )
-        tasks.append(task)
-
-    for coro in tqdm_asyncio.as_completed(
-        tasks,
-        position=hash(str(client.base_url)) % 10,
-        total=len(tasks),
-        desc="Processing QA pairs",
-    ):
-        qa_data, predicted_answer = await coro
+    
+    # Generate a unique position for the progress bar based on client base URL using SHA-256
+    # This ensures parallel scripts don't have overlapping progress bars
+    base_url_str = str(client.base_url) + str(data_path)
+    sha256_hash = hashlib.sha256(base_url_str.encode()).hexdigest()
+    position = int(sha256_hash, 16) % 16  # Get a number between 0-9
+    
+    # Process in batches but maintain your parallel tqdm approach
+    total_rows = len(dataset)
+    for start_idx in range(0, total_rows, batch_size):
+        end_idx = min(start_idx + batch_size, total_rows)
+        batch = dataset.iloc[start_idx:end_idx]
+        
+        # Create tasks for this batch
+        tasks = []
+        for _, row in batch.iterrows():
+            task = asyncio.create_task(
+                process_row(row, data_path, client, model_name, semaphore, use_text_input)
+            )
+            tasks.append(task)
+        
+        # Use tqdm_asyncio.as_completed to maintain parallel progress bars
+        batch_desc = f"Batch {start_idx//batch_size + 1}/{(total_rows-1)//batch_size + 1}"
+        
+        # Write results as they complete
         with open(output_csv, mode="a+", encoding="utf-8", newline="") as f_out:
             writer = csv.DictWriter(f_out, fieldnames=fieldnames)
-            writer.writerow(qa_data | {"Predicted_Answer": predicted_answer})
+            
+            for coro in tqdm_asyncio.as_completed(
+                tasks,
+                position=position,
+                total=len(tasks),
+                desc=f"{batch_desc} ({base_url_str})",
+                leave=False,
+            ):
+                qa_data, predicted_answer = await coro
+                writer.writerow(qa_data | {"Predicted_Answer": predicted_answer})
+
+            # Optional: add a small delay between batches to prevent API rate limits
+            f_out.flush()
+            await asyncio.sleep(0.01)
 
 
 def _load_dataset(data_path: Path, use_text_input: bool) -> pd.DataFrame:
@@ -223,21 +315,34 @@ async def main_async(args):
     if "base_url" not in args:
         args.base_url = f"http://{args.host}:{args.port}{args.endpoint}"
 
+    print(f"Connecting to API at {args.base_url}")
     client = AsyncOpenAI(api_key=args.api_key, base_url=args.base_url)
 
+    # Get available models
     try:
         model_names = await client.models.list()
-        global model_name
         model_name = model_names.data[0].id
+        print(f"Using model: {model_name}")
     except Exception as e:
-        print(e, "No models available")
-        return
+        print(f"Error getting models: {e}")
+        print("Using default model name...")
+        model_name = "default_model"
 
+    # Set output path
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
-        args.output_csv = os.path.join("data", f"qa_pairs_answers_{model_format}.csv")
+        args.output_csv = os.path.join("data_cache", args.exp_name, f"qa_pairs_answers_{model_format}.csv")
+    
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
 
-    # Step 1: Read all QA pairs synchronously
+    # Test connection before proceeding
+    connection_ok = await test_connection(client, model_name)
+    if not connection_ok:
+        print("Connection test failed")
+        return
+
+    # Load dataset
     use_text_input = args.text_json_path is not None
     data_path = (
         args.text_json_path if use_text_input else Path(args.data_path) / args.exp_name
@@ -246,16 +351,16 @@ async def main_async(args):
     full_dataset = _load_dataset(data_path, use_text_input)
     print(f"Total QA pairs to process: {len(full_dataset)}")
 
-    # Step 2: Check for already completed QA pairs and filter them out
+    # Check for already completed QA pairs
     completed_qids = _get_completed_qids(args.output_csv)
     print(f"Already processed {len(completed_qids)} QA pairs.")
 
-    remaining_qids = sorted(set(full_dataset.index.tolist()) - set(completed_qids))
-    print(f"QA pairs remaining to process: {len(remaining_qids)}")
-    remaining_dataset = full_dataset.iloc[remaining_qids].reset_index()
+    # Filter out completed QIDs
+    remaining_dataset = full_dataset.loc[~full_dataset.index.isin(completed_qids)].reset_index()
+    print(f"QA pairs remaining to process: {len(remaining_dataset)}")
 
-    # Step 3: Process remaining QA pairs asynchronously with intermediate storage
-    if remaining_qids or False:
+    # Process remaining QA pairs
+    if len(remaining_dataset) > 0:
         print(f"Writing output to {args.output_csv}")
         await process_dataset(
             remaining_dataset,
@@ -265,6 +370,7 @@ async def main_async(args):
             model_name,
             args.semaphore_limit,
             use_text_input,
+            args.batch_size,
         )
         print(f"Processing complete. Answers have been written to {args.output_csv}")
     else:
@@ -280,8 +386,8 @@ def main():
         "--base_url", type=str, default=argparse.SUPPRESS, help="Base URL for the API"
     )
     parser.add_argument("--port", type=str, default="8000", help="Port for the API")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Port for the API")
-    parser.add_argument("--endpoint", type=str, default="/v1", help="Port for the API")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host for the API")
+    parser.add_argument("--endpoint", type=str, default="/v1", help="API endpoint")
     parser.add_argument(
         "--data_path",
         type=str,
@@ -299,14 +405,19 @@ def main():
         help="Path to the output CSV file",
     )
     parser.add_argument(
-        "--vllm",
-        type=bool,
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="If server is vLLM",
+        "--semaphore_limit", type=int, default=16, help="Limit for concurrent requests"
     )
     parser.add_argument(
-        "--semaphore_limit", type=int, default=16, help="Limit for concurrent requests"
+        "--timeout", type=int, default=60, help="Timeout in seconds for each request"
+    )
+    parser.add_argument(
+        "--max_retries", type=int, default=2, help="Maximum number of retries for failed requests"
+    )
+    parser.add_argument(
+        "--batch_size", type=int, default=128, help="Number of items to process in each batch"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Force processing even if connection test fails"
     )
     args = parser.parse_args()
 

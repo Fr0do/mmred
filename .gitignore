@@ -171,4 +171,4 @@ cython_debug/
 
 data
 results
-cache
+*cache
