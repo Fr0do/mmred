@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import argparse
 
 
 def load_data(filepath):
@@ -81,7 +82,9 @@ def generate_heatmaps(heatmap_data, output_dir):
         heatmap_data (pd.DataFrame): Data for generating heatmaps.
         output_dir (str): Directory to save the heatmaps.
     """
-    custom_cmap = sns.color_palette("RdYlGn", as_cmap=True)
+    # custom_cmap = sns.color_palette("RdYlGn", as_cmap=True)
+    custom_cmap = sns.color_palette("PRGn", as_cmap=True)
+    # custom_cmap = sns.color_palette("Spectral", as_cmap=True)
 
     # Plot 1: Mean of all models
     mean_all_models = (
@@ -149,22 +152,45 @@ def generate_heatmaps(heatmap_data, output_dir):
             ylabel="Images in context",
             title=model,
             output_path=os.path.join(
-                output_dir, f"mmlong_{"_".join(model.split("/"))}.png"
+                output_dir, f"mmlong_{'_'.join(model.split('/'))}.png"
             ),
             cmap=custom_cmap,
         )
 
 
-if __name__ == "__main__":
-    exp_name = "main_1mv"
-    data_path = f"results/{exp_name}_newest_results.csv"
-    output_directory = f"results/{exp_name}"
+def main():
+    parser = argparse.ArgumentParser(description="Generate heatmaps from CSV data.")
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default="results.csv",
+        help="Path to the CSV file containing the heatmap data.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="results",
+        help="Directory to save the generated heatmaps.",
+    )
+    parser.add_argument(
+        "--exp_name",
+        type=str,
+        default="main",
+        help="Name of the experiment (used for naming output files).",
+    )
+    args = parser.parse_args()
+    
+    output_dir = os.path.join(args.output_dir, args.exp_name)
 
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
     try:
-        data = load_data(data_path)
-        generate_heatmaps(data, output_directory)
+        data = load_data(args.data_path)
+        generate_heatmaps(data, output_dir)
     except Exception as e:
         print(f"An error occurred: {e}")
+
+
+if __name__ == "__main__":
+    main()

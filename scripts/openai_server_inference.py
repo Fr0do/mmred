@@ -141,11 +141,11 @@ async def process_row(
 
     # Prepare extra body parameters
     extra_body = {
-        "repetition_penalty": 1.1,
+        # "repetition_penalty": 1.0,
         "min_p" : 0.1,
     }
     
-    if row.get("atype") in schemas:
+    if row.get("atype") in schemas or False:
         extra_body.update({
             "guided_json": schemas[row["atype"]],
             "guided_decoding_backend": "outlines",
@@ -165,8 +165,8 @@ async def process_row(
                     client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        temperature=0.0, # 2.0 for thinking
-                        max_completion_tokens=50, # 1024 for thinking
+                        temperature=1.5, # 2.0 for thinking
+                        max_completion_tokens=2048, # 1024 for thinking
                         extra_body=extra_body,
                     ),
                     timeout=timeout
@@ -244,8 +244,9 @@ async def process_dataset(
     
     # Generate a unique position for the progress bar based on client base URL using SHA-256
     # This ensures parallel scripts don't have overlapping progress bars
-    base_url_str = str(client.base_url) + str(data_path)
-    sha256_hash = hashlib.sha256(base_url_str.encode()).hexdigest()
+    base_url_str = str(client.base_url)
+    hash_url_str = base_url_str + str(data_path)
+    sha256_hash = hashlib.sha256(hash_url_str.encode()).hexdigest()
     position = int(sha256_hash, 16) % 16  # Get a number between 0-9
     
     # Process in batches but maintain your parallel tqdm approach
@@ -331,7 +332,7 @@ async def main_async(args):
     # Set output path
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
-        args.output_csv = os.path.join("data_cache", args.exp_name, f"qa_pairs_answers_{model_format}.csv")
+        args.output_csv = os.path.join("data", args.exp_name, f"qa_pairs_answers_{model_format}.csv")
     
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
@@ -408,7 +409,7 @@ def main():
         "--semaphore_limit", type=int, default=16, help="Limit for concurrent requests"
     )
     parser.add_argument(
-        "--timeout", type=int, default=60, help="Timeout in seconds for each request"
+        "--timeout", type=int, default=1200, help="Timeout in seconds for each request"
     )
     parser.add_argument(
         "--max_retries", type=int, default=2, help="Maximum number of retries for failed requests"
