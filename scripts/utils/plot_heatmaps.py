@@ -74,7 +74,7 @@ def plot_heatmap(
     plt.close()
 
 
-def generate_heatmaps(heatmap_data, output_dir):
+def generate_heatmaps(heatmap_data, output_dir, exp_name):
     """
     Generate and save multiple heatmaps based on the provided data.
 
@@ -115,7 +115,7 @@ def generate_heatmaps(heatmap_data, output_dir):
         mean_all_lengths,
         xlabel="Type of question",
         ylabel="Model",
-        title="Mean of all lengths",
+        title=f"{exp_name} Mean of all lengths",
         output_path=os.path.join(output_dir, "mmlong_all_lengths.png"),
         cmap=custom_cmap,
         rotation=-60,
@@ -134,7 +134,7 @@ def generate_heatmaps(heatmap_data, output_dir):
         mean_all_questions,
         xlabel="Model",
         ylabel="Images in context",
-        title="Mean of all questions",
+        title=f"{exp_name} Mean of all questions",
         output_path=os.path.join(output_dir, "mmlong_all_questions.png"),
         cmap=custom_cmap,
     )
@@ -150,7 +150,7 @@ def generate_heatmaps(heatmap_data, output_dir):
             model_data,
             xlabel="Type of question",
             ylabel="Images in context",
-            title=model,
+            title=exp_name + " " + model,
             output_path=os.path.join(
                 output_dir, f"mmlong_{'_'.join(model.split('/'))}.png"
             ),
@@ -187,7 +187,7 @@ def main():
 
     try:
         data = load_data(args.data_path)
-        generate_heatmaps(data, output_dir)
+        generate_heatmaps(data, output_dir, args.exp_name)
     except Exception as e:
         print(f"An error occurred: {e}")
 
