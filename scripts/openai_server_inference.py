@@ -103,9 +103,9 @@ def get_image_urls(row: pd.Series, data_path: Path) -> List[Dict]:
     ]
 
 
-def get_text_sequence(row: pd.Series) -> List[Dict]:
+def get_text_sequence(row: pd.Series, key: str) -> List[Dict]:
     return (
-        "\n".join(str(frame) for frame in row["sequence_json"]) + "\n" + row["question"]
+        "\n".join(str(frame) for frame in row[key]) + "\n" + row["question"]
     )
 
 
@@ -116,13 +116,15 @@ async def process_row(
     model_name: str,
     semaphore: asyncio.Semaphore,
     use_text_input: bool,
-    timeout: int = 600,  # Add timeout parameter
-    max_retries: int = 2  # Add retry parameter
+    timeout: int = 600,
+    max_retries: int = 2,
+    thinking: bool = False,
 ) -> Tuple[Dict, str]:
     # Prepare the content based on input type
     if use_text_input:
-        user_content = [{"type": "text", "text": get_text_sequence(row)}]
-        row_dict = row.drop("sequence_json").to_dict()
+        key = "sequence_json" if "sequence_json" in row else "sequence_description"
+        user_content = [{"type": "text", "text": get_text_sequence(row, key)}]
+        row_dict = row.drop(key).to_dict()
     else:
         try:
             image_urls = get_image_urls(row, data_path)
@@ -145,7 +147,7 @@ async def process_row(
         "min_p" : 0.1,
     }
     
-    if row.get("atype") in schemas or False:
+    if row.get("atype") in schemas and not thinking:
         extra_body.update({
             "guided_json": schemas[row["atype"]],
             "guided_decoding_backend": "outlines",
@@ -165,8 +167,8 @@ async def process_row(
                     client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        temperature=1.5, # 2.0 for thinking
-                        max_completion_tokens=2048, # 1024 for thinking
+                        temperature=1.5 if thinking else 0.0,
+                        max_completion_tokens=2048 if thinking else 50,
                         extra_body=extra_body,
                     ),
                     timeout=timeout
@@ -229,8 +231,10 @@ async def process_dataset(
     semaphore_limit: int = 10,
     use_text_input: bool = False,
     batch_size: int = 128,
+    timeout: int = 600,
+    max_retries: int = 2,
+    thinking: bool = False,
 ):
-    import hashlib  # Add import at the top of the function
     
     semaphore = asyncio.Semaphore(semaphore_limit)
     # batch_size = min(batch_size, semaphore_limit)
@@ -247,7 +251,7 @@ async def process_dataset(
     base_url_str = str(client.base_url)
     hash_url_str = base_url_str + str(data_path)
     sha256_hash = hashlib.sha256(hash_url_str.encode()).hexdigest()
-    position = int(sha256_hash, 16) % 16  # Get a number between 0-9
+    position = int(sha256_hash, 16) % 16
     
     # Process in batches but maintain your parallel tqdm approach
     total_rows = len(dataset)
@@ -259,7 +263,7 @@ async def process_dataset(
         tasks = []
         for _, row in batch.iterrows():
             task = asyncio.create_task(
-                process_row(row, data_path, client, model_name, semaphore, use_text_input)
+                process_row(row, data_path, client, model_name, semaphore, use_text_input, timeout, max_retries, thinking)
             )
             tasks.append(task)
         
@@ -372,6 +376,9 @@ async def main_async(args):
             args.semaphore_limit,
             use_text_input,
             args.batch_size,
+            args.timeout,
+            args.max_retries,
+            args.thinking,
         )
         print(f"Processing complete. Answers have been written to {args.output_csv}")
     else:
@@ -419,6 +426,9 @@ def main():
     )
     parser.add_argument(
         "--force", action="store_true", help="Force processing even if connection test fails"
+    )
+    parser.add_argument(
+        "--thinking", action="store_true", default=False, help="If model is a thinker"
     )
     args = parser.parse_args()
 
