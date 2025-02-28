@@ -1,5 +1,6 @@
 import re
 from typing import Dict
+import math
 
 global COUNTER
 COUNTER = 0
@@ -100,6 +101,55 @@ def len_reward(completions: list[Dict[str, str]], answer: list[str], **kwargs) -
             reward = lambda_val
         else:
             reward = min(0, lambda_val)
+        rewards.append(float(reward))
+
+    return rewards
+
+
+def cosine_len_correctness_reward(
+    completions: list[Dict[str, str]],
+    answer: list[str],
+    min_value_wrong: float = -2.0,
+    max_value_wrong: float = -0.5,
+    min_value_correct: float = 0.5,
+    max_value_correct: float = 2.0,
+    max_len: int = 1000,
+    **kwargs
+) -> float:
+    # First check correctness of answers
+    correctness = correctness_reward(completions, answer)
+
+    # Calculate lengths
+    lengths = [len(completion[0]["content"]) for completion in completions]
+    min_len = min(lengths)
+    max_len = max(lengths)
+
+    # If all responses have the same length, return zero rewards
+    if max_len == min_len:
+        return [0.0] * len(completions)
+
+    rewards = []
+    for length, correctness in zip(lengths, correctness):
+        lambda_val = 0.5 - (length - min_len) / (max_len - min_len)
+        if correctness > 0:
+            reward = lambda_val
+        else:
+            reward = min(0, lambda_val)
+        rewards.append(float(reward))
+
+        # Apply cosine scaling based on length
+        progress = length / max_len
+        cosine = math.cos(progress * math.pi)
+
+        if correctness > 0:
+            min_value = min_value_correct
+            max_value = max_value_correct
+        else:
+            # Swap min/max for incorrect answers
+            min_value = max_value_wrong
+            max_value = min_value_wrong
+
+        reward = min_value + 0.5 * (max_value - min_value) * (1.0 + cosine)
         rewards.append(float(reward))
 
     return rewards

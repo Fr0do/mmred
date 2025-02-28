@@ -11,6 +11,7 @@ from rewards import (
     strict_format_reward,
     len_reward,
     xmlcount_reward,
+    cosine_len_correctness_reward,
 )
 
 try:
@@ -108,11 +109,9 @@ def main(
         train_dataset=dataset,
         reward_funcs=[
             atype_reward,
-            correctness_reward,
-            soft_format_reward,
             strict_format_reward,
-            len_reward,
             xmlcount_reward,
+            cosine_len_correctness_reward,
         ],
         args=training_args,
     )

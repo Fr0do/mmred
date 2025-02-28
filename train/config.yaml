@@ -18,7 +18,7 @@ fast_inference: true
 use_vllm: true
 vllm_gpu_memory_utilization: 0.85
 vllm_max_model_len: 2048
-vllm_enable_prefix_caching: false
+vllm_enable_prefix_caching: true
 # Peft Model
 lora_r: 32
 lora_target_modules:
@@ -38,8 +38,8 @@ use_liger: true
 
 # Training Args
 beta: 0.01
-temperature: 1.0
-per_device_train_batch_size: 48
+temperature: 0.7
+per_device_train_batch_size: 32
 num_generations: 16
 gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
@@ -50,8 +50,8 @@ dataloader_prefetch_factor: 4
 dataloader_num_workers: 8
 dataloader_pin_memory: true
 # group_by_length: true
-learning_rate: 5.e-4
-weight_decay: 5.e-5
+learning_rate: 3.e-4
+weight_decay: 3.e-5
 adam_beta1: 0.9
 adam_beta2: 0.999
 warmup_ratio: 0.05
