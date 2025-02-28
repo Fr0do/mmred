@@ -104,9 +104,7 @@ def get_image_urls(row: pd.Series, data_path: Path) -> List[Dict]:
 
 
 def get_text_sequence(row: pd.Series, key: str) -> List[Dict]:
-    return (
-        "\n".join(str(frame) for frame in row[key]) + "\n" + row["question"]
-    )
+    return "\n".join(str(frame) for frame in row[key]) + "\n" + row["question"]
 
 
 async def process_row(
@@ -144,19 +142,21 @@ async def process_row(
     # Prepare extra body parameters
     extra_body = {
         # "repetition_penalty": 1.0,
-        "min_p" : 0.1,
+        "min_p": 0.1,
     }
-    
+
     if row.get("atype") in schemas and not thinking:
-        extra_body.update({
-            "guided_json": schemas[row["atype"]],
-            "guided_decoding_backend": "outlines",
-        })
-        
+        extra_body.update(
+            {
+                "guided_json": schemas[row["atype"]],
+                "guided_decoding_backend": "outlines",
+            }
+        )
+
     if "Aria" in model_name:
-        extra_body.update({
-            "stop_token_ids": [93532, 93653, 944, 93421, 1019, 93653, 93519]
-        })
+        extra_body.update(
+            {"stop_token_ids": [93532, 93653, 944, 93421, 1019, 93653, 93519]}
+        )
 
     # Use semaphore for rate limiting
     async with semaphore:
@@ -171,56 +171,76 @@ async def process_row(
                         max_completion_tokens=2048 if thinking else 50,
                         extra_body=extra_body,
                     ),
-                    timeout=timeout
+                    timeout=timeout,
                 )
                 answer = response.choices[0].message.content
                 return row_dict, answer
-            
+
             except asyncio.TimeoutError:
                 retry_count += 1
                 if retry_count <= max_retries:
-                    wait_time = 2 ** retry_count  # Exponential backoff
-                    print(f"Request for qid={row.get('qid', 'unknown')} timed out. Retrying in {wait_time} seconds...")
+                    wait_time = 2**retry_count  # Exponential backoff
+                    print(
+                        f"Request for qid={row.get('qid', 'unknown')} timed out. Retrying in {wait_time} seconds..."
+                    )
                     await asyncio.sleep(wait_time)
                 else:
                     return row_dict, "Error: Request timed out after multiple attempts"
-                    
+
             except Exception as e:
                 retry_count += 1
                 if retry_count <= max_retries:
-                    wait_time = 2 ** retry_count
-                    print(f"Error for qid={row.get('qid', 'unknown')}: {e}. Retrying in {wait_time} seconds...")
+                    wait_time = 2**retry_count
+                    print(
+                        f"Error for qid={row.get('qid', 'unknown')}: {e}. Retrying in {wait_time} seconds..."
+                    )
                     await asyncio.sleep(wait_time)
                 else:
                     return row_dict, f"Error after {max_retries} retries: {str(e)}"
 
-async def test_connection(client: AsyncOpenAI, model_name: str, max_retries: int = 3, backoff_factor: float = 1.5):
+
+async def test_connection(
+    client: AsyncOpenAI,
+    model_name: str,
+    max_retries: int = 3,
+    backoff_factor: float = 1.5,
+):
     """Test the API connection and model availability with retries and backoff."""
     dummy_messages = [
-        {"role": "system", "content": "Your only purpose is to answer 'hello world' to any message."},
+        {
+            "role": "system",
+            "content": "Your only purpose is to answer 'hello world' to any message.",
+        },
         {"role": "user", "content": "Who are you?"},
     ]
-    
+
     retry_count = 0
     while retry_count < max_retries:
         try:
-            print(f"Testing connection to model {model_name}... (attempt {retry_count+1})")
+            print(
+                f"Testing connection to model {model_name}... (attempt {retry_count+1})"
+            )
             response = await client.chat.completions.create(
                 model=model_name,
                 messages=dummy_messages,
                 max_completion_tokens=25,
-                timeout=30  # Add a timeout to prevent hanging
+                timeout=30,  # Add a timeout to prevent hanging
             )
-            print(f"Connection successful. Response: {response.choices[0].message.content}")
+            print(
+                f"Connection successful. Response: {response.choices[0].message.content}"
+            )
             return True
         except Exception as e:
             retry_count += 1
-            wait_time = backoff_factor ** retry_count
-            print(f"Connection test failed: {e}. Retrying in {wait_time:.1f} seconds...")
+            wait_time = backoff_factor**retry_count
+            print(
+                f"Connection test failed: {e}. Retrying in {wait_time:.1f} seconds..."
+            )
             await asyncio.sleep(wait_time)
-    
+
     print("Failed to establish connection after maximum retries.")
     return False
+
 
 async def process_dataset(
     dataset: pd.DataFrame,
@@ -235,45 +255,57 @@ async def process_dataset(
     max_retries: int = 2,
     thinking: bool = False,
 ):
-    
+
     semaphore = asyncio.Semaphore(semaphore_limit)
     # batch_size = min(batch_size, semaphore_limit)
-    
+
     # Ensure output file exists with headers
     with open(output_csv, mode="a+", encoding="utf-8", newline="") as f_out:
         fieldnames = dataset.columns.tolist() + ["Predicted_Answer"]
         writer = csv.DictWriter(f_out, fieldnames=fieldnames)
         if os.path.getsize(output_csv) == 0:
             writer.writeheader()
-    
+
     # Generate a unique position for the progress bar based on client base URL using SHA-256
     # This ensures parallel scripts don't have overlapping progress bars
     base_url_str = str(client.base_url)
     hash_url_str = base_url_str + str(data_path)
     sha256_hash = hashlib.sha256(hash_url_str.encode()).hexdigest()
     position = int(sha256_hash, 16) % 16
-    
+
     # Process in batches but maintain your parallel tqdm approach
     total_rows = len(dataset)
     for start_idx in range(0, total_rows, batch_size):
         end_idx = min(start_idx + batch_size, total_rows)
         batch = dataset.iloc[start_idx:end_idx]
-        
+
         # Create tasks for this batch
         tasks = []
         for _, row in batch.iterrows():
             task = asyncio.create_task(
-                process_row(row, data_path, client, model_name, semaphore, use_text_input, timeout, max_retries, thinking)
+                process_row(
+                    row,
+                    data_path,
+                    client,
+                    model_name,
+                    semaphore,
+                    use_text_input,
+                    timeout,
+                    max_retries,
+                    thinking,
+                )
             )
             tasks.append(task)
-        
+
         # Use tqdm_asyncio.as_completed to maintain parallel progress bars
-        batch_desc = f"Batch {start_idx//batch_size + 1}/{(total_rows-1)//batch_size + 1}"
-        
+        batch_desc = (
+            f"Batch {start_idx//batch_size + 1}/{(total_rows-1)//batch_size + 1}"
+        )
+
         # Write results as they complete
         with open(output_csv, mode="a+", encoding="utf-8", newline="") as f_out:
             writer = csv.DictWriter(f_out, fieldnames=fieldnames)
-            
+
             for coro in tqdm_asyncio.as_completed(
                 tasks,
                 position=position,
@@ -336,8 +368,10 @@ async def main_async(args):
     # Set output path
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
-        args.output_csv = os.path.join("data", args.exp_name, f"qa_pairs_answers_{model_format}.csv")
-    
+        args.output_csv = os.path.join(
+            "data", args.exp_name, f"qa_pairs_answers_{model_format}.csv"
+        )
+
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
 
@@ -361,7 +395,9 @@ async def main_async(args):
     print(f"Already processed {len(completed_qids)} QA pairs.")
 
     # Filter out completed QIDs
-    remaining_dataset = full_dataset.loc[~full_dataset.index.isin(completed_qids)].reset_index()
+    remaining_dataset = full_dataset.loc[
+        ~full_dataset.index.isin(completed_qids)
+    ].reset_index()
     print(f"QA pairs remaining to process: {len(remaining_dataset)}")
 
     # Process remaining QA pairs
@@ -419,13 +455,21 @@ def main():
         "--timeout", type=int, default=1200, help="Timeout in seconds for each request"
     )
     parser.add_argument(
-        "--max_retries", type=int, default=2, help="Maximum number of retries for failed requests"
+        "--max_retries",
+        type=int,
+        default=2,
+        help="Maximum number of retries for failed requests",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=128, help="Number of items to process in each batch"
+        "--batch_size",
+        type=int,
+        default=128,
+        help="Number of items to process in each batch",
     )
     parser.add_argument(
-        "--force", action="store_true", help="Force processing even if connection test fails"
+        "--force",
+        action="store_true",
+        help="Force processing even if connection test fails",
     )
     parser.add_argument(
         "--thinking", action="store_true", default=False, help="If model is a thinker"

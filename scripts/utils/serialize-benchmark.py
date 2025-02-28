@@ -59,7 +59,7 @@ def serialize_sequence(sequence: List[Dict[str, str]]) -> List[Dict[str, Any]]:
 
     for step_i, step_map in enumerate(sequence, start=1):
         output_sequence.append(
-            {"frame_id": step_i, "rooms": _parse_rooms_mapping(step_map)}
+            {"step_id": step_i, "rooms": _parse_rooms_mapping(step_map)}
         )
     return output_sequence
 
@@ -76,16 +76,16 @@ def serialize_dataset(
 
     result_dataset = []
     seqlen = dataset_fn.split("/")[-2]
+
     for sample in dataset:
         sequence_fn = os.path.join(data_path, seqlen, sample["sequence"])
         sample_sequences = pd.read_csv(sequence_fn).to_dict("records")
-        sample["sequence_json"] = serialize_sequence(sample_sequences)
+        serialized_sequence = serialize_sequence(sample_sequences)
+        sample["sequence_json"] = serialized_sequence
         result_dataset.append(sample)
 
     if output_fn is None:
-        output_fn = os.path.join(
-            data_path, sample["seqlen"], "text_serialized_questions.json"
-        )
+        output_fn = os.path.join(data_path, seqlen, "text_serialized_questions.json")
 
     with open(output_fn, "w") as f:
         json.dump(result_dataset, f)
@@ -93,13 +93,21 @@ def serialize_dataset(
     return result_dataset
 
 
+def process_dataset_file(dataset_fn: Path, data_path: Path) -> List[Dict[str, Any]]:
+    output_fn = data_path / (
+        dataset_fn.parent.name + "_" + "text_serialized_questions.json"
+    )
+    print(f"Will be saved to:\n{output_fn}")
+    text_dataset_part = serialize_dataset(
+        str(dataset_fn), str(data_path), str(output_fn)
+    )
+    print(f"Done.\n")
+    return text_dataset_part
+
+
 def main(data_path: str):
     data_path = Path(data_path)
-    dataset_files = []
-    for d in data_path.glob("*"):
-        if d.is_dir():
-            for fn in d.glob("*.json"):
-                dataset_files.append(fn)
+    dataset_files = list(data_path.glob("*/*.json"))
     print(f"Found {len(dataset_files)} dataset files.")
 
     resulting_serialized_dataset = []
@@ -112,11 +120,7 @@ def main(data_path: str):
         text_dataset_part = serialize_dataset(
             str(dataset_fn), str(data_path), str(output_fn)
         )
-        print(f"Done.\n")
-
-        with open(output_fn, "r") as f:
-            data = json.load(f)
-        resulting_serialized_dataset.extend(data)
+        resulting_serialized_dataset.extend(text_dataset_part)
 
     output_fn = data_path / "all_text_serialized_questions.json"
     print(f"Will be saved to:\n{output_fn}")

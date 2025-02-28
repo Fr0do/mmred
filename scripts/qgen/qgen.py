@@ -24,7 +24,7 @@ def _generate_question(q_fn, seq_len, q_hashes, **kwargs):
 def generate_questions(base_path, exp_name):
     fix_seed(SEED)
 
-    if exp_name == "main":
+    if "main" in exp_name:
         exp_path = Path(base_path) / exp_name
         q_id = 0
 

@@ -1,0 +1,80 @@
+# Recipe for training a GRPO model on an A100 GPU
+
+# Dataset
+dataset_name: "dataset/hf_main_1mv_train"
+split: "train"
+system_prompt: "You are an assistant that analyzes sequences of human agents moving in an environment.\nAnswer with:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.\n\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>\n'"
+
+# Base Model
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+tokenizer_name: Qwen/Qwen2.5-1.5B-Instruct
+model_revision: main
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+max_seq_len: 2048
+load_in_4bit: true
+fast_inference: true
+# gpu_memory_utilization: 0.75
+use_vllm: true
+vllm_gpu_memory_utilization: 0.85
+vllm_max_model_len: 2048
+vllm_enable_prefix_caching: false
+# Peft Model
+lora_r: 32
+lora_target_modules:
+  "all-linear"
+  # - "q_proj"
+  # - "k_proj"
+  # - "v_proj"
+  # - "o_proj"
+  # - "gate_proj"
+  # - "up_proj"
+  # - "down_proj"
+lora_alpha: 32
+lora_dropout: 0.05
+random_state: 42
+use_peft: true
+use_liger: true
+
+# Training Args
+beta: 0.01
+temperature: 1.0
+per_device_train_batch_size: 48
+num_generations: 16
+gradient_accumulation_steps: 1
+use_gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+gradient_checkpointing: true
+dataloader_prefetch_factor: 4
+dataloader_num_workers: 8
+dataloader_pin_memory: true
+# group_by_length: true
+learning_rate: 5.e-4
+weight_decay: 5.e-5
+adam_beta1: 0.9
+adam_beta2: 0.999
+warmup_ratio: 0.05
+lr_scheduler_type: cosine
+optim: "adamw_torch"
+log_completions: true
+log_level: info
+logging_first_step: true
+logging_steps: 1
+logging_strategy: steps
+bf16: true
+fp16: false
+max_prompt_length: 1024
+max_completion_length: 512
+max_steps: -1
+num_train_epochs: 1
+max_grad_norm: 1.0
+output_dir: "mv1_grpo"
+overwrite_output_dir: true
+report_to:
+  - "wandb"
+seed: 42
+save_steps: 128
+save_total_limit: 1
+# hub_model_id: "dondo_sss/mmlong-grpo"
+# push_to_hub: true

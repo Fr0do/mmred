@@ -12,10 +12,23 @@ def inv1d_argmax(a):
     return len(a) - np.argmax(a[::-1]) - 1
 
 
-def generate_sequence_df(seq_len):
-    return pd.DataFrame(
-        {char: [random.choice(ROOMS) for _ in range(seq_len)] for char in CHARS}
-    )
+def generate_sequence_df(seq_len, one_move: bool = True):
+    if one_move:
+        seq = [{char: random.choice(ROOMS) for char in CHARS}]
+        for _ in range(1, seq_len):
+            char_to_move = random.choice(CHARS)
+            room_to_move = random.choice(sorted(set(ROOMS) - {seq[-1][char_to_move]}))
+            seq.append(
+                {
+                    char: (room_to_move if (char == char_to_move) else seq[-1][char])
+                    for char in CHARS
+                }
+            )
+        return pd.DataFrame.from_records(seq)
+    else:
+        return pd.DataFrame(
+            {char: [random.choice(ROOMS) for _ in range(seq_len)] for char in CHARS}
+        )
 
 
 def hash_seq_df(df):

@@ -121,24 +121,26 @@ def parse_predicted_answer(predicted_answer):
     except Exception:
         match = re.search(answer_pattern, predicted_answer, flags=re.IGNORECASE)
         return match[0] if match else "None"
-    
+
+
 def strip_until_first_brace(string):
     # Find the position of "</think>"
     think_end = string.find("</think>")
-    
+
     # If "</think>" is not found, return the original string
     if think_end == -1:
         return string
-    
+
     # Find the position of the first "{" after "</think>"
     brace_start = string.find("{", think_end)
-    
+
     # If "{" is not found after "</think>", return the original string
     if brace_start == -1:
         return string
-    
+
     # Return the substring starting from the first "{"
     return string[brace_start:]
+
 
 # Function to process a single model's data
 def process_model_data(path, debug=False):
@@ -166,10 +168,15 @@ def process_model_data(path, debug=False):
 
     if debug:
         print(f"Using {df_answers.shape[0]} answers")
-    df_answers["Predicted_Answer"] = df_answers["Predicted_Answer"].apply(lambda x: strip_until_first_brace(x))
+    df_answers["Predicted_Answer"] = df_answers["Predicted_Answer"].apply(
+        lambda x: strip_until_first_brace(x)
+    )
 
     # Parse predicted answers
-    parsed_answers = [parse_predicted_answer(row["Predicted_Answer"]) for _, row in df_answers.iterrows()]
+    parsed_answers = [
+        parse_predicted_answer(row["Predicted_Answer"])
+        for _, row in df_answers.iterrows()
+    ]
     df_answers["Final_Answer"] = parsed_answers
 
     # Validate and compare answers
@@ -195,9 +202,21 @@ def process_model_data(path, debug=False):
 def main():
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Process and analyze QA pairs.")
-    parser.add_argument("--exp_name", type=str, default="main", help="Name of the experiment")
-    parser.add_argument("--input_dir", type=str, default="data", help="Directory containing input CSV files")
-    parser.add_argument("--output_dir", type=str, default="results", help="Directory to save output CSV files")
+    parser.add_argument(
+        "--exp_name", type=str, default="main", help="Name of the experiment"
+    )
+    parser.add_argument(
+        "--input_dir",
+        type=str,
+        default="data",
+        help="Directory containing input CSV files",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="results",
+        help="Directory to save output CSV files",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
 
     args = parser.parse_args()
