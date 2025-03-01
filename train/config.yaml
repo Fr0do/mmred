@@ -3,20 +3,21 @@
 # Dataset
 dataset_name: "dataset/hf_main_1mv_train"
 split: "train"
-system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>"
+system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>\n"
+task_prompt: "Format your <answer>\n<value>\n</answer> with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
 # Base Model
 model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
 tokenizer_name: Qwen/Qwen2.5-1.5B-Instruct
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
-max_seq_len: 2048
+max_seq_len: 1024
 load_in_4bit: true
 fast_inference: true
 # gpu_memory_utilization: 0.75
 use_vllm: true
 vllm_gpu_memory_utilization: 0.85
-vllm_max_model_len: 2048
+vllm_max_model_len: 1024
 vllm_enable_prefix_caching: true
 # Peft Model
 lora_r: 32
@@ -75,8 +76,8 @@ max_completion_length: 512
 max_steps: -1
 num_train_epochs: 1
 max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_grpo"
-run_name: "mv1_grpo"
+output_dir: "checkpoints/mv1_grpo_qwen_1.5b"
+run_name: "mv1_grpo_qwen_1.5b"
 overwrite_output_dir: true
 report_to:
   - "wandb"

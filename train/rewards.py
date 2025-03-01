@@ -122,7 +122,7 @@ def cosine_length_correctness_reward(
       - For answers shorter than len_cap, the reward scales linearly from 0 up to max_value_correct.
       - For answers at least as long as len_cap, the reward decays from max_value_correct (at len_cap)
         to min_value_correct (for the longest answers) using a cosine transform.
-    
+
     Incorrect answers receive a fixed penalty regardless of length.
 
     Args:
@@ -137,8 +137,10 @@ def cosine_length_correctness_reward(
         A list of reward values corresponding to each completion.
     """
     # Assume correctness_reward returns a list of 1 (correct) or 0 (incorrect) for each completion.
-    correctness = correctness_reward(completions, answer)  # This function is assumed to exist.
-    
+    correctness = correctness_reward(
+        completions, answer
+    )  # This function is assumed to exist.
+
     # Determine maximum answer length from completions (for scaling longer answers)
     lengths = [len(completion[0]["content"]) for completion in completions]
     max_len = max(lengths)
@@ -159,12 +161,12 @@ def cosine_length_correctness_reward(
                     normalized = 0
                 # Cosine: highest (1) at len_cap and decays toward 0 at the longest answer.
                 cosine = math.cos(normalized * (math.pi / 2))
-                reward = min_value_correct + (max_value_correct - min_value_correct) * cosine
+                reward = (
+                    min_value_correct + (max_value_correct - min_value_correct) * cosine
+                )
         else:
             reward = penalty_incorrect
-        
+
         rewards.append(reward)
-    
+
     return rewards
-
-

@@ -45,20 +45,24 @@ class DatasetArgs:
     system_prompt: str | None = (
         "You are a reasoning agent. Format your response with xml: \n\n<think>\n...\n</think>\n<answer>\n...\n</answer>"
     )
+    task_prompt: str | None = "Answer with a single word or number."
 
 
 def get_dataset(dataset_args: DatasetArgs) -> Dataset:
-    data = load_dataset(dataset_args.dataset_name)[dataset_args.split]  # type: ignore
+    data = load_dataset(dataset_args.dataset_name)[dataset_args.split]
     data = data.map(
-        lambda x: {  # type: ignore
+        lambda x: {
             "prompt": [
                 {"role": "system", "content": dataset_args.system_prompt},
-                {"role": "user", "content": x["question"]},
+                {
+                    "role": "user",
+                    "content": dataset_args.task_prompt + "\n" + x["question"],
+                },
             ],
             "answer": x["answer"],
         }
-    )  # type: ignore
-    return data  # type: ignore
+    )
+    return data
 
 
 def main(
@@ -96,7 +100,9 @@ def main(
     tokenizer.pad_token = tokenizer.eos_token
 
     special_tokens = ["<think>", "</think>", "<answer>", "</answer>"]
-    tokens_to_add = [token for token in special_tokens if token not in tokenizer.get_vocab()]
+    tokens_to_add = [
+        token for token in special_tokens if token not in tokenizer.get_vocab()
+    ]
     if tokens_to_add:
         tokenizer.add_tokens(tokens_to_add)
         print("Added thinking tokens:", tokens_to_add)

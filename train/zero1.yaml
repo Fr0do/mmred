@@ -4,7 +4,6 @@ dynamo_config:
   dynamo_backend: CUDAGRAPHS
 deepspeed_config:
   deepspeed_multinode_launcher: standard
-  gradient_accumulation_steps: 1
   zero3_init_flag: false
   zero_stage: 1
 distributed_type: DEEPSPEED
