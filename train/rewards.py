@@ -56,10 +56,9 @@ def count_xml(text) -> float:
         count += 0.125
     if text.count("\n<answer>\n") == 1:
         count += 0.125
-        count -= len(text.split("\n</answer>\n")[-1]) * 0.001
     if text.count("\n</answer>") == 1:
         count += 0.125
-        count -= (len(text.split("\n</answer>")[-1]) - 1) * 0.001
+    count -= len(text.split("</answer>")[-1]) * 0.001
     return count
 
 
@@ -106,50 +105,66 @@ def len_reward(completions: list[Dict[str, str]], answer: list[str], **kwargs) -
     return rewards
 
 
-def cosine_len_correctness_reward(
-    completions: list[Dict[str, str]],
+def cosine_length_correctness_reward(
+    completions: list[dict],
     answer: list[str],
-    min_value_wrong: float = -2.0,
-    max_value_wrong: float = -0.5,
-    min_value_correct: float = 0.5,
-    max_value_correct: float = 2.0,
-    max_len: int = 1000,
+    len_cap: int = 64,
+    min_value_correct: float = 0.25,
+    max_value_correct: float = 1.0,
+    penalty_incorrect: float = -0.5,
     **kwargs
-) -> float:
-    # First check correctness of answers
-    correctness = correctness_reward(completions, answer)
+) -> list[float]:
+    """
+    Compute rewards for a list of completions based on answer correctness and answer length,
+    ensuring a minimum answer length (len_cap) for the highest reward.
 
-    # Calculate lengths
+    Correct answers:
+      - For answers shorter than len_cap, the reward scales linearly from 0 up to max_value_correct.
+      - For answers at least as long as len_cap, the reward decays from max_value_correct (at len_cap)
+        to min_value_correct (for the longest answers) using a cosine transform.
+    
+    Incorrect answers receive a fixed penalty regardless of length.
+
+    Args:
+        completions: List of dictionaries, each containing a "content" key with the answer text.
+        answer: The ground truth answer(s) (used by correctness_reward, assumed to return 1 for correct, 0 otherwise).
+        len_cap: Minimum acceptable answer length for optimal reward.
+        min_value_correct: Minimum reward for correct answers (when answer length is very long).
+        max_value_correct: Maximum reward for correct answers (when answer length == len_cap).
+        penalty_incorrect: Fixed penalty value for incorrect answers.
+
+    Returns:
+        A list of reward values corresponding to each completion.
+    """
+    # Assume correctness_reward returns a list of 1 (correct) or 0 (incorrect) for each completion.
+    correctness = correctness_reward(completions, answer)  # This function is assumed to exist.
+    
+    # Determine maximum answer length from completions (for scaling longer answers)
     lengths = [len(completion[0]["content"]) for completion in completions]
-    min_len = min(lengths)
     max_len = max(lengths)
-
-    # If all responses have the same length, return zero rewards
-    if max_len == min_len:
-        return [0.0] * len(completions)
-
     rewards = []
-    for length, correctness in zip(lengths, correctness):
-        lambda_val = 0.5 - (length - min_len) / (max_len - min_len)
-        if correctness > 0:
-            reward = lambda_val
+
+    for length, is_correct in zip(lengths, correctness):
+        if is_correct:
+            if length < len_cap:
+                # Penalize answers that are too short even if correct.
+                # Reward scales linearly with length up to len_cap.
+                reward = max_value_correct * (length / len_cap)
+            else:
+                # For answers longer than or equal to len_cap, use cosine decay.
+                # Normalize length between len_cap and max_len.
+                if max_len > len_cap:
+                    normalized = (length - len_cap) / (max_len - len_cap)
+                else:
+                    normalized = 0
+                # Cosine: highest (1) at len_cap and decays toward 0 at the longest answer.
+                cosine = math.cos(normalized * (math.pi / 2))
+                reward = min_value_correct + (max_value_correct - min_value_correct) * cosine
         else:
-            reward = min(0, lambda_val)
-        rewards.append(float(reward))
-
-        # Apply cosine scaling based on length
-        progress = length / max_len
-        cosine = math.cos(progress * math.pi)
-
-        if correctness > 0:
-            min_value = min_value_correct
-            max_value = max_value_correct
-        else:
-            # Swap min/max for incorrect answers
-            min_value = max_value_wrong
-            max_value = min_value_wrong
-
-        reward = min_value + 0.5 * (max_value - min_value) * (1.0 + cosine)
-        rewards.append(float(reward))
-
+            reward = penalty_incorrect
+        
+        rewards.append(reward)
+    
     return rewards
+
+

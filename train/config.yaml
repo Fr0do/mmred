@@ -1,10 +1,9 @@
-# Recipe for training a GRPO model on an A100 GPU
+# Recipe for training a GRPO model on an 4xA100 GPU
 
 # Dataset
 dataset_name: "dataset/hf_main_1mv_train"
 split: "train"
-system_prompt: "You are an assistant that analyzes sequences of human agents moving in an environment.\nAnswer with:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.\n\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>\n'"
-
+system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>"
 # Base Model
 model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
 tokenizer_name: Qwen/Qwen2.5-1.5B-Instruct
@@ -30,6 +29,9 @@ lora_target_modules:
   # - "gate_proj"
   # - "up_proj"
   # - "down_proj"
+lora_modules_to_save:
+  - "embed_tokens"
+  - "lm_head"
 lora_alpha: 32
 lora_dropout: 0.05
 random_state: 42
@@ -41,6 +43,7 @@ beta: 0.01
 temperature: 0.7
 per_device_train_batch_size: 32
 num_generations: 16
+epsilon: 0.3
 gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
 gradient_checkpointing_kwargs:
@@ -50,12 +53,15 @@ dataloader_prefetch_factor: 4
 dataloader_num_workers: 8
 dataloader_pin_memory: true
 # group_by_length: true
-learning_rate: 3.e-4
-weight_decay: 3.e-5
+learning_rate: 5.e-6
+lora_learning_rate: 5.e-4
+weight_decay: 5.e-6
 adam_beta1: 0.9
 adam_beta2: 0.999
 warmup_ratio: 0.05
-lr_scheduler_type: cosine
+lr_scheduler_type: cosine_with_min_lr
+lr_scheduler_kwargs:
+  min_lr_rate: 0.1
 optim: "adamw_torch"
 log_completions: true
 log_level: info
@@ -69,7 +75,8 @@ max_completion_length: 512
 max_steps: -1
 num_train_epochs: 1
 max_grad_norm: 1.0
-output_dir: "mv1_grpo"
+output_dir: "checkpoints/mv1_grpo"
+run_name: "mv1_grpo"
 overwrite_output_dir: true
 report_to:
   - "wandb"

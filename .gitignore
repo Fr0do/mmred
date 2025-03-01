@@ -173,3 +173,4 @@ data*
 results
 *cache
 wandb
+checkpoints

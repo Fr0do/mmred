@@ -11,7 +11,7 @@ from rewards import (
     strict_format_reward,
     len_reward,
     xmlcount_reward,
-    cosine_len_correctness_reward,
+    cosine_length_correctness_reward,
 )
 
 try:
@@ -28,7 +28,7 @@ except ImportError:
 #     seed=1337,
 #    )
 # except ImportError:
-#     print("unsloth not installed, falling back to trl GRPO")
+#     print("unsloth not in_stalled, falling back to trl GRPO")
 from trl import GRPOConfig, GRPOTrainer, TrlParser, ModelConfig
 
 
@@ -94,12 +94,24 @@ def main(
 
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
     tokenizer.pad_token = tokenizer.eos_token
+
+    special_tokens = ["<think>", "</think>", "<answer>", "</answer>"]
+    tokens_to_add = [token for token in special_tokens if token not in tokenizer.get_vocab()]
+    if tokens_to_add:
+        tokenizer.add_tokens(tokens_to_add)
+        print("Added thinking tokens:", tokens_to_add)
+        tokenizer.save_pretrained(training_args.output_dir)
+    else:
+        print("Thinking tokens are already present in the tokenizer.")
+
     if model_args.use_peft:
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM,
             r=model_args.lora_r,
             target_modules=model_args.lora_target_modules,
+            modules_to_save=model_args.lora_modules_to_save,
             lora_alpha=model_args.lora_alpha,
+            init_lora_weights="pissa_niter_16",
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
@@ -111,7 +123,7 @@ def main(
             atype_reward,
             strict_format_reward,
             xmlcount_reward,
-            cosine_len_correctness_reward,
+            correctness_reward,
         ],
         args=training_args,
     )
