@@ -1,34 +1,22 @@
-# Recipe for training a GRPO model on an 4xA100 GPU
+# Recipe for training an SFT model on an 4xA100 GPU
 
 # Dataset
 dataset_name: "dataset/hf_main_1mv_train"
 split: "train"
-system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>\n"
-task_prompt: "Format your <answer>\n<value>\n</answer> with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
+system_prompt: "You are a helpful AI Assistant."
+task_prompt: "Format your answer with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
 # Base Model
 model_name_or_path: Qwen/Qwen2.5-3B-Instruct
 tokenizer_name: Qwen/Qwen2.5-3B-Instruct
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
-load_in_4bit: true
-fast_inference: true
-# gpu_memory_utilization: 0.75
-use_vllm: true
-vllm_gpu_memory_utilization: 0.85
-vllm_max_model_len: 4096
+max_seq_length: 1024
 vllm_enable_prefix_caching: true
 # Peft Model
 lora_r: 32
 lora_target_modules:
   "all-linear"
-  # - "q_proj"
-  # - "k_proj"
-  # - "v_proj"
-  # - "o_proj"
-  # - "gate_proj"
-  # - "up_proj"
-  # - "down_proj"
 lora_modules_to_save:
   - "embed_tokens"
   - "lm_head"
@@ -37,18 +25,14 @@ lora_dropout: 0.05
 random_state: 42
 use_peft: true
 use_liger: true
+use_sft: true
 
 # Training Args
-beta: 0.01
-temperature: 0.7
 per_device_train_batch_size: 16
-num_generations: 16
-epsilon: 0.3
-gradient_accumulation_steps: 2
+gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: false
-gradient_checkpointing: true
 dataloader_prefetch_factor: 4
 dataloader_num_workers: 8
 dataloader_pin_memory: true
@@ -70,18 +54,18 @@ logging_steps: 1
 logging_strategy: steps
 bf16: true
 fp16: false
-max_prompt_length: 1024
-max_completion_length: 1024
 max_steps: -1
-num_train_epochs: 1
+num_train_epochs: 5
+eval_strategy: epoch
 max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_grpo_qwen_3b"
-run_name: "mv1_grpo_qwen_3b"
+output_dir: "checkpoints/mv1_sft_qwen_3b"
+run_name: "mv1_sft_qwen_3b"
 overwrite_output_dir: true
 report_to:
   - "wandb"
 seed: 42
-save_steps: 128
+save_strategy: epoch
+# save_steps: -1
 save_total_limit: 1
 # hub_model_id: "dondo_sss/mmlong-grpo"
 # push_to_hub: true
