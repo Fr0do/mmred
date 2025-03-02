@@ -11,12 +11,14 @@ tokenizer_name: Qwen/Qwen2.5-3B-Instruct
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
-max_seq_length: 2048
+max_seq_length: 8192
 vllm_enable_prefix_caching: true
 # Peft Model
 lora_r: 32
 lora_target_modules: "all-linear"
-lora_modules_to_save: null
+lora_modules_to_save: 
+#  - "lm_head"
+#  - "embed_tokens"
 lora_alpha: 32
 lora_dropout: 0.05
 random_state: 42
@@ -27,7 +29,6 @@ use_sft: true
 
 # Training Args
 per_device_train_batch_size: 16
-per_device_eval_batch_size: 16
 gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
 gradient_checkpointing_kwargs:
@@ -56,9 +57,12 @@ fp16: false
 max_steps: -1
 num_train_epochs: 5
 eval_strategy: epoch
+per_device_eval_batch_size: 16
+bf16_full_eval: true
+batch_eval_metrics: true
 max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_sft_qwen_3b_lora"
-run_name: "mv1_sft_qwen_3b_lora"
+output_dir: "checkpoints/mv1_sft_qwen_3b_lora_8_steps"
+run_name: "mv1_sft_qwen_3b_lora_8_steps"
 overwrite_output_dir: true
 report_to:
   - "wandb"

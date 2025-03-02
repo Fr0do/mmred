@@ -51,6 +51,15 @@ schemas = {
     AnswerTypePerson: PersonAnswer.model_json_schema(),
 }
 
+THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
+First think about the reasoning process and then provide the user with the answer.
+Respond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>
+Format your answer with a single <value>, where <value> is:
+- A **single room name** (e.g., "Kitchen") for location answers.
+- A **number** (e.g., "3") for counting answers.
+- A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions.
+"""
+
 SYSTEM_PROMPT = """You are an assistant that analyzes sequences of human agents moving in an environment.
 Format your response as a following json:
 { "answer": <value> }
@@ -135,7 +144,7 @@ async def process_row(
             return row.to_dict(), f"Error preparing images: {str(e)}"
 
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": THINKING_PROMPT if thinking else SYSTEM_PROMPT},
         {"role": "user", "content": user_content},
     ]
 
@@ -354,16 +363,18 @@ async def main_async(args):
 
     print(f"Connecting to API at {args.base_url}")
     client = AsyncOpenAI(api_key=args.api_key, base_url=args.base_url)
-
-    # Get available models
-    try:
-        model_names = await client.models.list()
-        model_name = model_names.data[0].id
-        print(f"Using model: {model_name}")
-    except Exception as e:
-        print(f"Error getting models: {e}")
-        print("Using default model name...")
-        model_name = "default_model"
+    if args.model_name:
+        model_name = args.model_name
+    else:
+        # Get available models
+        try:
+            model_names = await client.models.list()
+            model_name = model_names.data[0].id
+            print(f"Using model: {model_name}")
+        except Exception as e:
+            print(f"Error getting models: {e}")
+            print("Using default model name...")
+            model_name = "default_model"
 
     # Set output path
     if "output_csv" not in args:
@@ -473,6 +484,9 @@ def main():
     )
     parser.add_argument(
         "--thinking", action="store_true", default=False, help="If model is a thinker"
+    )
+    parser.add_argument(
+        "--model_name", type=str, default=None, help="Model Name"
     )
     args = parser.parse_args()
 

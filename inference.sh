@@ -7,11 +7,12 @@ TEXT1_ARGS="--text_json_path /workspace-SR004.nfs2/data/long_vqa_synth/main_1mv/
 TEXT_ARGS="--text_json_path /workspace-SR004.nfs2/data/long_vqa_synth/main/all_text_serialized_questions.json  --exp_name main --semaphore_limit 128 --batch_size 300"
 TEXT_NLG_ARGS="--text_json_path /workspace-SR004.nfs2/data/long_vqa_synth/main_1mv/text_description_serialized.json  --exp_name nlg_1mv --semaphore_limit 128 --batch_size 300"
 (
-    python scripts/openai_server_inference.py --port 8002 $TEXT_NLG_ARGS &
-    python scripts/openai_server_inference.py --port 8004 $TEXT_NLG_ARGS --thinking &
+    # python scripts/openai_server_inference.py --port 8004 $TEXT_NLG_ARGS &
+    # python scripts/openai_server_inference.py --port 8004 $TEXT_NLG_ARGS --thinking &
     # python scripts/openai_server_inference.py --port 8003 $TEXT_ARGS &
-    # python scripts/openai_server_inference.py --port 8004 $TEXT1_ARGS &
-    # python scripts/openai_server_inference.py --port 8004 $TEXT_ARGS &
+    # python scripts/openai_server_inference.py --port 8004 $TEXT1_ARGS --model_name mmlong-lora &
+    python scripts/openai_server_inference.py --port 8005 $TEXT1_ARGS --thinking &
+    python scripts/openai_server_inference.py --port 8004 $TEXT1_ARGS --thinking &
     # python scripts/openai_server_inference.py --port 8002 $TEXT_ARGS &
     # python scripts/openai_server_inference.py --port 8003 $TEXT_ARGS &
     # python scripts/openai_server_inference.py --port 8014 $ARGS &

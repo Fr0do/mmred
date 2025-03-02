@@ -26,6 +26,40 @@ def load_data(filepath):
         raise
 
 
+def filter_models(heatmap_data, models_list):
+    """
+    Filter the heatmap data to include only specified models.
+
+    Args:
+        heatmap_data (pd.DataFrame): Original heatmap data.
+        models_list (list): List of model names to include.
+
+    Returns:
+        pd.DataFrame: Filtered heatmap data.
+    """
+    if not models_list:
+        return heatmap_data
+    
+    # Get all available models
+    available_models = heatmap_data.index.get_level_values("model").unique().tolist()
+    
+    # Check if specified models exist in the data
+    valid_models = [model for model in models_list if model in available_models]
+    
+    if not valid_models:
+        print(f"Warning: None of the specified models {models_list} found in data. Using all models.")
+        return heatmap_data
+    
+    if len(valid_models) < len(models_list):
+        missing_models = set(models_list) - set(valid_models)
+        print(f"Warning: Some models not found in data: {missing_models}")
+    
+    # Filter data to include only specified models
+    filtered_data = heatmap_data[heatmap_data.index.get_level_values("model").isin(valid_models)]
+    
+    return filtered_data
+
+
 def plot_heatmap(
     data,
     xlabel,
@@ -81,6 +115,7 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
     Args:
         heatmap_data (pd.DataFrame): Data for generating heatmaps.
         output_dir (str): Directory to save the heatmaps.
+        exp_name (str): Name of the experiment (used for plot titles).
     """
     # custom_cmap = sns.color_palette("RdYlGn", as_cmap=True)
     custom_cmap = sns.color_palette("PRGn", as_cmap=True)
@@ -96,8 +131,8 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
     plot_heatmap(
         mean_all_models,
         xlabel="Type of question",
-        ylabel="Frames in context",
-        title="Mean of all models",
+        ylabel="Steps in context",
+        title=f"{exp_name} Mean of all models",
         output_path=os.path.join(output_dir, "mmlong_all_models.png"),
         cmap=custom_cmap,
     )
@@ -133,7 +168,7 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
     plot_heatmap(
         mean_all_questions,
         xlabel="Model",
-        ylabel="Images in context",
+        ylabel="Steps in context",
         title=f"{exp_name} Mean of all questions",
         output_path=os.path.join(output_dir, "mmlong_all_questions.png"),
         cmap=custom_cmap,
@@ -149,8 +184,8 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
         plot_heatmap(
             model_data,
             xlabel="Type of question",
-            ylabel="Images in context",
-            title=exp_name + " " + model,
+            ylabel="Steps in context",
+            title=f"{exp_name} {model}",
             output_path=os.path.join(
                 output_dir, f"mmlong_{'_'.join(model.split('/'))}.png"
             ),
@@ -178,6 +213,12 @@ def main():
         default="main",
         help="Name of the experiment (used for naming output files).",
     )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        help="List of models to include in the analysis. If not specified, all models will be used.",
+    )
     args = parser.parse_args()
 
     output_dir = os.path.join(args.output_dir, args.exp_name)
@@ -186,8 +227,30 @@ def main():
         os.makedirs(output_dir)
 
     try:
+        # Load the data
         data = load_data(args.data_path)
+        
+        # Apply model filtering if specified
+        if args.models:
+            print(f"Filtering data to include only these models: {args.models}")
+            filtered_data = filter_models(data, args.models)
+            
+            # Create a models suffix for output directory
+            models_suffix = "_".join([m.split("/")[-1] for m in args.models[:3]])
+            if len(args.models) > 3:
+                models_suffix += "_etc"
+            
+            # Create a subdirectory for these specific models
+            models_output_dir = os.path.join(output_dir, f"models_{models_suffix}")
+            if not os.path.exists(models_output_dir):
+                os.makedirs(models_output_dir)
+                
+            # Generate heatmaps with filtered data
+            generate_heatmaps(filtered_data, models_output_dir, f"{args.exp_name} (Selected Models)")
+        
+        # Always generate the full heatmaps as well
         generate_heatmaps(data, output_dir, args.exp_name)
+        
     except Exception as e:
         print(f"An error occurred: {e}")
 

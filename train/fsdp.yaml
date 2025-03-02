@@ -6,7 +6,6 @@ enable_cpu_affinity: false
 fsdp_config:
   fsdp_activation_checkpointing: true
   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
-  # fsdp_transformer_layer_cls_to_wrap: "lm_head"
   fsdp_backward_prefetch: BACKWARD_PRE
   fsdp_cpu_ram_efficient_loading: true
   fsdp_forward_prefetch: true
@@ -19,7 +18,6 @@ machine_rank: 0
 main_training_function: main
 mixed_precision: bf16
 num_machines: 1
-num_processes: 4
 rdzv_backend: static
 same_network: true
 tpu_env: []

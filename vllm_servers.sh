@@ -53,15 +53,18 @@ COMMON_TEXT_ARGS="--enable-chunked-prefill --guided_decoding_backend outlines --
     # CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-7B-Instruct" vllm serve Qwen/Qwen2.5-7B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8002 --max-num-batched-tokens 8192 --max-model-len 13000 &
     # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen/Qwen2.5-Coder-7B-Instruct" vllm serve Qwen/Qwen2.5-Coder-7B-Instruct -tp 2 --gpu-memory-utilization 0.3 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 4096 --max-model-len 13000 &
     # sleep 75
-    CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-32B-Instruct" vllm serve Qwen/Qwen2.5-32B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8002 --max-num-batched-tokens 8192 --max-model-len 13000 &
+    # CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-32B-Instruct" vllm serve Qwen/Qwen2.5-32B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8002 --max-num-batched-tokens 8192 --max-model-len 13000 &
     # sleep 75
     # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen/Qwen2.5-Coder-32B-Instruct" vllm serve Qwen/Qwen2.5-Coder-32B-Instruct -tp 2 --gpu-memory-utilization 0.85 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 4096 --max-model-len 13000 &
     # CUDA_VISIBLE_DEVICES=4,5,6,7 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-72B-Instruct" vllm serve Qwen/Qwen2.5-72B-Instruct -tp 4 --gpu-memory-utilization 0.85 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 4096 --max-model-len 13000 &
-    CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Qwen-32B" vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-32B -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 8192 --max-model-len 13000 & 
+    # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Qwen-32B" vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-32B -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 8192 --max-model-len 13000 & 
     # CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Llama-8B" vllm serve deepseek-ai/DeepSeek-R1-Distill-Llama-8B -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 8192 --max-model-len 12000 &
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Llama-70B" vllm serve deepseek-ai/DeepSeek-R1-Distill-Llama-70B -tp 4 --gpu-memory-utilization 0.9 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 8192 --max-model-len 12000 &
     # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Qwen-7B" vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-7B -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 8192 --max-model-len 12000 &
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Qwen-14B" vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-14B -tp 4 --gpu-memory-utilization 0.85 $COMMON_TEXT_ARGS --port 8010 --max-num-batched-tokens 8192 --max-model-len 12000 &
+    CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-7B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-7B-Instruct-GRPO -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8005 --max-num-batched-tokens 8192 --max-model-len 10000 & 
+    CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-3B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-3B-Instruct-GRPO -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 8192 --max-model-len 10000 & 
+    # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-7B-Instruct" vllm serve Qwen/Qwen2.5-7B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 8192 --max-model-len 10000 --max_lora_rank 32 --enable-lora --lora-modules mmlong-grpo=checkpoints/mv1_grpo_qwen_3b_lora/checkpoint-128 & 
     wait
 ) &
 

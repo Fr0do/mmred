@@ -8,6 +8,8 @@ from pydantic import BaseModel, ValidationError
 from typing import Optional, Set, Literal, Iterable
 from json_repair import repair_json
 import argparse
+import multiprocessing as mp
+from functools import partial
 
 # Define the Pydantic models
 room_names = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]
@@ -16,6 +18,9 @@ people_names = ["Nobody", "Daniel", "Mary", "Michael", "Sandra", "John"]
 # Define the regex pattern
 all_names = "|".join(room_names + people_names + ["\\d"])
 answer_pattern = rf"\b({all_names})\b"
+
+# Add a pattern for numeric answers with garbage
+numeric_pattern = r"[<>'\"`,.]*(\d+)"
 
 
 class RoomAnswer(BaseModel):
@@ -38,6 +43,11 @@ def evaluate_string(s):
     try:
         return literal_eval(s)
     except (ValueError, SyntaxError):
+        # Check if it's a numeric answer with garbage
+        if isinstance(s, str):
+            numeric_match = re.search(numeric_pattern, s)
+            if numeric_match:
+                return int(numeric_match.group(1))
         return s  # Return the string as-is if evaluation fails
 
 
@@ -69,6 +79,11 @@ def normalize_answer(answer, model):
     if model == NumberAnswer:
         if isinstance(answer, (str, Iterable)) and "Nobody" in answer:
             answer = 0
+        # Handle the case where answer is a string with a number
+        elif isinstance(answer, str):
+            numeric_match = re.search(numeric_pattern, answer)
+            if numeric_match:
+                answer = int(numeric_match.group(1))
     return answer  # No normalization needed for other models
 
 
@@ -93,14 +108,23 @@ def validate_and_compare(row):
         # Normalize the evaluated 'Predicted_Answer'
         normalized_prediction = normalize_answer(evaluated_prediction, model)
 
+        # If this is a numeric answer, try to extract a number if it failed earlier
+        if model == NumberAnswer and not isinstance(normalized_prediction, int):
+            if isinstance(normalized_prediction, str):
+                numeric_match = re.search(r'\d+', normalized_prediction)
+                if numeric_match:
+                    normalized_prediction = int(numeric_match.group(0))
+
         # Validate the 'Predicted_Answer'
         validated_prediction = model(reasoning=None, answer=normalized_prediction)
 
         # Compare the validated answers
         return validated_answer.answer == validated_prediction.answer
-    except ValidationError:
+    except ValidationError as e:
         return False
-    except ValueError:
+    except ValueError as e:
+        return False
+    except Exception as e:
         return False
 
 
@@ -119,6 +143,13 @@ def parse_predicted_answer(predicted_answer):
                 parsed_answer = {"Nobody"}
         return parsed_answer
     except Exception:
+        # Try to extract a number if it looks like a numeric answer
+        if isinstance(predicted_answer, str):
+            numeric_match = re.search(numeric_pattern, predicted_answer)
+            if numeric_match:
+                return int(numeric_match.group(1))
+        
+        # Otherwise try the original pattern
         match = re.search(answer_pattern, predicted_answer, flags=re.IGNORECASE)
         return match[0] if match else "None"
 
@@ -130,7 +161,7 @@ def strip_until_first_brace(string):
     # If "</think>" is not found, return the original string
     if think_end == -1:
         return string
-
+    string = string.replace("</answer>", "").replace("<answer>", "")
     # Find the position of the first "{" after "</think>"
     brace_start = string.find("{", think_end)
 
@@ -148,54 +179,59 @@ def process_model_data(path, debug=False):
         return None
 
     if debug:
-        print("Parsing", path)
+        print(f"Processing {path} in process {os.getpid()}")
 
-    # Read CSV
-    df_answers = pd.read_csv(path, sep=",", on_bad_lines="warn")
-    if "Answer" in df_answers.columns:
-        df_answers = df_answers.rename(
-            columns={
-                "Answer": "answer",
-                "N_steps": "seq_len",
-                "Type": "qtype",
-            }
+    try:
+        # Read CSV
+        df_answers = pd.read_csv(path, sep=",", on_bad_lines="warn")
+        if "Answer" in df_answers.columns:
+            df_answers = df_answers.rename(
+                columns={
+                    "Answer": "answer",
+                    "N_steps": "seq_len",
+                    "Type": "qtype",
+                }
+            )
+
+        # Filter out rows with errors in the predicted answer
+        df_answers = df_answers[
+            ~df_answers["Predicted_Answer"].str.lower().str.contains("error", na=True)
+        ]
+
+        if debug:
+            print(f"Using {df_answers.shape[0]} answers for {path}")
+        df_answers["Predicted_Answer"] = df_answers["Predicted_Answer"].apply(
+            lambda x: strip_until_first_brace(x)
         )
 
-    # Filter out rows with errors in the predicted answer
-    df_answers = df_answers[
-        ~df_answers["Predicted_Answer"].str.lower().str.contains("error", na=True)
-    ]
+        # Parse predicted answers
+        parsed_answers = [
+            parse_predicted_answer(row["Predicted_Answer"])
+            for _, row in df_answers.iterrows()
+        ]
+        df_answers["Final_Answer"] = parsed_answers
 
-    if debug:
-        print(f"Using {df_answers.shape[0]} answers")
-    df_answers["Predicted_Answer"] = df_answers["Predicted_Answer"].apply(
-        lambda x: strip_until_first_brace(x)
-    )
+        # Validate and compare answers
+        df_answers["hit"] = df_answers.apply(validate_and_compare, axis=1).astype(int)
 
-    # Parse predicted answers
-    parsed_answers = [
-        parse_predicted_answer(row["Predicted_Answer"])
-        for _, row in df_answers.iterrows()
-    ]
-    df_answers["Final_Answer"] = parsed_answers
+        # Extract model name from the file path
+        model_name = "/".join(path.split("answers_")[-1].split(".csv")[0].split("_", 1))
+        df_answers["model"] = model_name
 
-    # Validate and compare answers
-    df_answers["hit"] = df_answers.apply(validate_and_compare, axis=1).astype(int)
+        # Calculate hit rate
+        hit_rate = (
+            df_answers.groupby(["seq_len", "qtype"])["hit"]
+            .mean()
+            .sort_index()
+            .to_frame("hit")
+        )
+        hit_rate["model"] = model_name
 
-    # Extract model name from the file path
-    model_name = "/".join(path.split("answers_")[-1].split(".csv")[0].split("_", 1))
-    df_answers["model"] = model_name
-
-    # Calculate hit rate
-    hit_rate = (
-        df_answers.groupby(["seq_len", "qtype"])["hit"]
-        .mean()
-        .sort_index()
-        .to_frame("hit")
-    )
-    hit_rate["model"] = model_name
-
-    return hit_rate.set_index(["model"], append=True)
+        return hit_rate.set_index(["model"], append=True)
+    except Exception as e:
+        if debug:
+            print(f"Error processing {path}: {e}")
+        return None
 
 
 # Main function
@@ -218,29 +254,54 @@ def main():
         help="Directory to save output CSV files",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument(
+        "--num_processes", 
+        type=int, 
+        default=None, 
+        help="Number of processes to use (default: number of CPU cores)"
+    )
 
     args = parser.parse_args()
 
     # Paths to answer files
     answers = glob.glob(f"{args.input_dir}/{args.exp_name}/qa_pairs_answers_*")
+    
+    if args.debug:
+        print(f"Found {len(answers)} files to process")
 
-    heatmap_data = []
+    # Determine number of processes
+    num_processes = args.num_processes or max(1, mp.cpu_count() - 1)
+    
+    if args.debug:
+        print(f"Using {num_processes} processes")
 
-    # Process each model's data
-    for path in answers:
-        result = process_model_data(path, debug=args.debug)
-        if result is not None:
-            heatmap_data.append(result)
+    # Create a pool of worker processes
+    with mp.Pool(processes=num_processes) as pool:
+        # Create a partial function with the debug argument
+        process_func = partial(process_model_data, debug=args.debug)
+        
+        # Process all files in parallel
+        results = pool.map(process_func, answers)
+        
+    # Filter out None results
+    heatmap_data = [result for result in results if result is not None]
 
     # Combine all results
-    heatmap_data = pd.concat(heatmap_data)
-    heatmap_data["hit"] = (heatmap_data["hit"].fillna(0) * 100).round(3)
+    if heatmap_data:
+        heatmap_data = pd.concat(heatmap_data)
+        heatmap_data["hit"] = (heatmap_data["hit"].fillna(0) * 100).round(3)
 
-    # Ensure the output directory exists
-    os.makedirs(args.output_dir, exist_ok=True)
+        # Ensure the output directory exists
+        os.makedirs(args.output_dir, exist_ok=True)
 
-    # Save the results
-    heatmap_data.to_csv(f"{args.output_dir}/{args.exp_name}_newest_results.csv")
+        # Save the results
+        output_file = f"{args.output_dir}/{args.exp_name}_newest_results.csv"
+        heatmap_data.to_csv(output_file)
+        
+        if args.debug:
+            print(f"Results saved to {output_file}")
+    else:
+        print("No valid results to save")
 
 
 if __name__ == "__main__":

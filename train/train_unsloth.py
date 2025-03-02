@@ -5,7 +5,7 @@ from huggingface_hub import login
 from dataclasses import dataclass, asdict
 from transformers import AutoTokenizer
 from unsloth import vLLMSamplingParams
-from reward_functions import (
+from rewards import (
     atype_reward,
     xmlcount_reward,
     correctness_reward,

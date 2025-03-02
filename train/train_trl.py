@@ -5,7 +5,7 @@ from peft import LoraConfig, get_peft_model, TaskType
 from huggingface_hub import login
 from dataclasses import dataclass
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import GRPOConfig, GRPOTrainer, TrlParser, ModelConfig, SFTConfig, SFTTrainer
+from trl import GRPOConfig, GRPOTrainer, TrlParser, ModelConfig, SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
 from rewards import (
     atype_reward,
     correctness_reward,
@@ -122,28 +122,29 @@ def main(
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
+    model.save_pretrained(training_args.output_dir)
+    training_args.use_liger = custom_args.use_liger
+    training_args.use_liger_kernel = custom_args.use_liger
 
     train_dataset = get_dataset(dataset_args, custom_args.use_sft)
     dataset_args.split = "val"
     val_dataset = get_dataset(dataset_args, custom_args.use_sft)
     eval_dataset = {"val": val_dataset}
     dataset_args.split = "test"
-    for i in (2**p for p in range(0, 8)):
+    for i in [16, 32, 64]:
         dataset_args.subset = f"seq_len_{i}"
         eval_dataset |= {f"test_{dataset_args.subset}": get_dataset(dataset_args, custom_args.use_sft)}
     if custom_args.use_sft:
-        training_args.use_liger = custom_args.use_liger
-        training_args.use_liger_kernel = custom_args.use_liger
         trainer = SFTTrainer(
             model=model,
             processing_class=processing_class,
+            data_collator=DataCollatorForCompletionOnlyLM(response_template="<|im_start|>assistant", tokenizer=processing_class),
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
+            # compute_metrics=compute_metrics,
         )
     else:
-        training_args.use_liger = custom_args.use_liger
-        training_args.use_liger_kernel = custom_args.use_liger
         trainer = GRPOTrainer(
             model=model,
             processing_class=processing_class,
@@ -157,12 +158,10 @@ def main(
             ],
             args=training_args,
         )
-
     trainer.train()
     if trainer.is_fsdp_enabled:
         trainer.accelerator.state.fsdp_plugin.set_state_dict_type("FULL_STATE_DICT")
-    trainer.save_model(training_args.output_dir)
-    trainer.test()
+    trainer.evaluate()
 
 
 if __name__ == "__main__":

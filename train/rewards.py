@@ -50,6 +50,7 @@ def soft_format_reward(completions, **kwargs) -> list[float]:
 
 def count_xml(text) -> float:
     count = 0.0
+    count -= len(text.split("<think>")[0]) * 0.001
     if text.count("<think>\n") == 1:
         count += 0.125
     if text.count("\n</think>\n") == 1:
