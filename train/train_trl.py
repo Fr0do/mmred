@@ -37,10 +37,11 @@ class DatasetArgs:
         "You are a reasoning agent. Format your response with xml:\n<think>\n...\n</think>\n<answer>\n...\n</answer>"
     )
     task_prompt: str | None = "Answer with a single word or number."
+    subset: str = "default"
 
 
 def get_dataset(dataset_args: DatasetArgs, use_sft: bool) -> Dataset:
-    data = load_dataset(dataset_args.dataset_name)[dataset_args.split]
+    data = load_dataset(dataset_args.dataset_name, dataset_args.subset)[dataset_args.split]
     if use_sft:
         data = data.map(
             lambda x: {
@@ -96,17 +97,17 @@ def main(
             attn_implementation=model_args.attn_implementation,
         )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
-    tokenizer.pad_token = tokenizer.eos_token
+    processing_class = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
+    processing_class.pad_token = processing_class.eos_token
     if not custom_args.use_sft:
         special_tokens = ["<think>", "</think>", "<answer>", "</answer>"]
         tokens_to_add = [
-            token for token in special_tokens if token not in tokenizer.get_vocab()
+            token for token in special_tokens if token not in processing_class.get_vocab()
         ]
         if tokens_to_add:
-            tokenizer.add_tokens(tokens_to_add)
+            processing_class.add_tokens(tokens_to_add)
             print("Added special tokens:", tokens_to_add)
-            tokenizer.save_pretrained(training_args.output_dir)
+            processing_class.save_pretrained(training_args.output_dir)
         else:
             print("Special tokens are already present in the tokenizer.")
 
@@ -123,24 +124,31 @@ def main(
         model.print_trainable_parameters()
 
     train_dataset = get_dataset(dataset_args, custom_args.use_sft)
+    dataset_args.split = "val"
+    val_dataset = get_dataset(dataset_args, custom_args.use_sft)
+    eval_dataset = {"val": val_dataset}
+    dataset_args.split = "test"
+    for i in (2**p for p in range(0, 8)):
+        dataset_args.subset = f"seq_len_{i}"
+        eval_dataset |= {f"test_{dataset_args.subset}": get_dataset(dataset_args, custom_args.use_sft)}
     if custom_args.use_sft:
-        dataset_args.split = "test"
         training_args.use_liger = custom_args.use_liger
-        eval_dataset = get_dataset(dataset_args, custom_args.use_sft)
-        print("Starting SFT Training...")
+        training_args.use_liger_kernel = custom_args.use_liger
         trainer = SFTTrainer(
             model=model,
-            processing_class=tokenizer,
+            processing_class=processing_class,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             args=training_args,
         )
     else:
-        print("Starting GRPO Training...")
+        training_args.use_liger = custom_args.use_liger
+        training_args.use_liger_kernel = custom_args.use_liger
         trainer = GRPOTrainer(
             model=model,
-            processing_class=tokenizer,
+            processing_class=processing_class,
             train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
             reward_funcs=[
                 atype_reward,
                 strict_format_reward,
@@ -154,6 +162,7 @@ def main(
     if trainer.is_fsdp_enabled:
         trainer.accelerator.state.fsdp_plugin.set_state_dict_type("FULL_STATE_DICT")
     trainer.save_model(training_args.output_dir)
+    trainer.test()
 
 
 if __name__ == "__main__":

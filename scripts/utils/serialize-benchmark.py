@@ -107,7 +107,7 @@ def process_dataset_file(dataset_fn: Path, data_path: Path) -> List[Dict[str, An
 
 def main(data_path: str):
     data_path = Path(data_path)
-    dataset_files = list(data_path.glob("*/*.json"))
+    dataset_files = list(data_path.glob("len_*/*.json"))
     print(f"Found {len(dataset_files)} dataset files.")
 
     resulting_serialized_dataset = []

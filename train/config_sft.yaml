@@ -11,35 +11,34 @@ tokenizer_name: Qwen/Qwen2.5-3B-Instruct
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
-max_seq_length: 1024
+max_seq_length: 2048
 vllm_enable_prefix_caching: true
 # Peft Model
 lora_r: 32
-lora_target_modules:
-  "all-linear"
-lora_modules_to_save:
-  - "embed_tokens"
-  - "lm_head"
+lora_target_modules: "all-linear"
+lora_modules_to_save: null
 lora_alpha: 32
 lora_dropout: 0.05
 random_state: 42
 use_peft: true
 use_liger: true
+use_liger_kernel: true
 use_sft: true
 
 # Training Args
 per_device_train_batch_size: 16
+per_device_eval_batch_size: 16
 gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: false
-dataloader_prefetch_factor: 4
-dataloader_num_workers: 8
+dataloader_prefetch_factor: 6
+dataloader_num_workers: 16
 dataloader_pin_memory: true
 group_by_length: true
-learning_rate: 5.e-6
-lora_learning_rate: 5.e-4
-weight_decay: 5.e-6
+learning_rate: 3.e-4
+lora_learning_rate: 3.e-4
+weight_decay: 1.e-4
 adam_beta1: 0.9
 adam_beta2: 0.999
 warmup_ratio: 0.05
@@ -58,8 +57,8 @@ max_steps: -1
 num_train_epochs: 5
 eval_strategy: epoch
 max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_sft_qwen_3b"
-run_name: "mv1_sft_qwen_3b"
+output_dir: "checkpoints/mv1_sft_qwen_3b_lora"
+run_name: "mv1_sft_qwen_3b_lora"
 overwrite_output_dir: true
 report_to:
   - "wandb"
