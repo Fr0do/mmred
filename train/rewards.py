@@ -1,173 +1,314 @@
 import re
-from typing import Dict
+from typing import Dict, List, Union
 import math
+import string
+import nltk
+from nltk.tokenize import sent_tokenize
 
-global COUNTER
-COUNTER = 0
-global PRINT_EVERY
-PRINT_EVERY = 128
+# Download necessary NLTK resources (uncomment if not already available)
+# nltk.download('punkt')
 
+# Constants
+PRINT_INTERVAL = 100  # For logging
+MIN_ACCEPTABLE_REASONING_LENGTH = 50  # Characters
+OPTIMAL_REASONING_LENGTH = 300  # Characters
+MAX_REASONING_LENGTH = 1000  # Characters
+
+# Define domain-specific knowledge
 room_names = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]
 people_names = ["Nobody", "Daniel", "Mary", "Michael", "Sandra", "John"]
 valid_names = set(room_names + people_names)
 
+# Logical operators and reasoning indicators
+reasoning_indicators = [
+    "because", "therefore", "thus", "since", "as a result", "if", "then",
+    "otherwise", "however", "although", "consequently", "given that",
+    "first", "second", "third", "finally", "lastly",
+    "consider", "assume", "suppose", "let's", "we know"
+]
 
 def extract_xml_answer(text: str) -> str:
-    answer = text.split("<answer>")[-1]
-    answer = answer.split("</answer>")[0]
-    return answer.strip()
+    """Extract answer from XML tags, with improved robustness."""
+    try:
+        answer = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
+        if answer:
+            return answer.group(1).strip()
+        else:
+            # Fallback for malformed XML
+            parts = text.split("<answer>")
+            if len(parts) > 1:
+                answer_part = parts[-1].split("</answer>")[0]
+                return answer_part.strip()
+            return ""
+    except Exception:
+        return ""
 
+def extract_xml_thinking(text: str) -> str:
+    """Extract thinking from XML tags."""
+    try:
+        thinking = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
+        if thinking:
+            return thinking.group(1).strip()
+        else:
+            # Fallback for malformed XML
+            parts = text.split("<think>")
+            if len(parts) > 1:
+                thinking_part = parts[-1].split("</think>")[0]
+                return thinking_part.strip()
+            return ""
+    except Exception:
+        return ""
 
-def correctness_reward(completions, answer, prompts=None, **kwargs) -> list[float]:
+def correctness_reward(completions, answer, **kwargs) -> List[float]:
+    """Reward for correct answers, now with partial credit for near-misses."""
     responses = [completion[0]["content"] for completion in completions]
     extracted_responses = [extract_xml_answer(r) for r in responses]
-    return [2.0 if r == a.strip() else 0.0 for r, a in zip(extracted_responses, answer)]
+    
+    rewards = []
+    for resp, ans in zip(extracted_responses, answer):
+        resp, ans = resp.strip(), ans.strip()
+        if resp == ans:
+            rewards.append(2.0)  # Full credit
+        elif resp in ans or ans in resp:
+            rewards.append(0.5)  # Partial credit for substring matches
+        elif resp.lower() == ans.lower():
+            rewards.append(1.0)  # Case-insensitive match
+        else:
+            # Check for high similarity (e.g., small typos)
+            similarity = string_similarity(resp, ans)
+            if similarity > 0.8:
+                rewards.append(0.5)
+            else:
+                rewards.append(0.0)
+    
+    return rewards
 
+def string_similarity(a: str, b: str) -> float:
+    """Calculate string similarity ratio using Levenshtein distance."""
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    
+    # Simple Levenshtein implementation
+    if len(a) < len(b):
+        a, b = b, a
+    if not b:
+        return 0.0
+    
+    previous_row = range(len(b) + 1)
+    for i, a_char in enumerate(a):
+        current_row = [i + 1]
+        for j, b_char in enumerate(b):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (a_char != b_char)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    # Convert to similarity ratio
+    distance = previous_row[-1]
+    max_len = max(len(a), len(b))
+    return 1 - (distance / max_len)
 
-def atype_reward(completions, **kwargs) -> list[float]:
+def atype_reward(completions, **kwargs) -> List[float]:
+    """Reward function for answer type validity with improved scoring."""
     responses = [completion[0]["content"] for completion in completions]
     extracted_responses = [extract_xml_answer(r) for r in responses]
-    return [
-        0.5 if r.isdigit() or r in valid_names else 0.0 for r in extracted_responses
-    ]
+    
+    rewards = []
+    for r in extracted_responses:
+        r = r.strip()
+        if r.isdigit():
+            rewards.append(0.5)
+        elif r in valid_names:
+            rewards.append(0.5)
+        elif any(name.lower() == r.lower() for name in valid_names):
+            # Case-insensitive match
+            rewards.append(0.3)
+        else:
+            rewards.append(0.0)
+    
+    return rewards
 
-
-def strict_format_reward(completions, **kwargs) -> list[float]:
-    """Reward function that checks if the completion has a specific format."""
-    pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$"
+def format_reward(completions, **kwargs) -> List[float]:
+    """Enhanced format reward that combines strict and soft checks with gradients."""
     responses = [completion[0]["content"] for completion in completions]
-    matches = [re.match(pattern, r, re.DOTALL | re.MULTILINE) for r in responses]
-    return [0.5 if match else 0.0 for match in matches]
+    
+    strict_pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$"
+    good_pattern = r"<think>.*?</think>\s*<answer>.*?</answer>"
+    minimal_pattern = r"<think>.*?</think>.*?<answer>.*?</answer>"
+    
+    rewards = []
+    for r in responses:
+        if re.match(strict_pattern, r, re.DOTALL | re.MULTILINE):
+            rewards.append(0.75)  # Perfect formatting
+        elif re.match(good_pattern, r, re.DOTALL | re.MULTILINE):
+            rewards.append(0.5)   # Good formatting
+        elif re.match(minimal_pattern, r, re.DOTALL | re.MULTILINE):
+            rewards.append(0.25)  # At least has the tags in order
+        else:
+            # Count tags for partial credit
+            score = 0.0
+            if "<think>" in r and "</think>" in r:
+                score += 0.1
+            if "<answer>" in r and "</answer>" in r:
+                score += 0.1
+            if r.find("<think>") < r.find("</think>") < r.find("<answer>") < r.find("</answer>"):
+                score += 0.05  # Tags in correct order
+            rewards.append(score)
+    
+    return rewards
 
-
-def soft_format_reward(completions, **kwargs) -> list[float]:
-    """Reward function that checks if the completion has a specific format."""
-    pattern = r"<think>.*?</think>\s*<answer>.*?</answer>"
+def reasoning_quality_reward(completions, **kwargs) -> List[float]:
+    """New reward function that evaluates the quality of reasoning."""
     responses = [completion[0]["content"] for completion in completions]
-    matches = [re.match(pattern, r, re.DOTALL | re.MULTILINE) for r in responses]
-    return [0.25 if match else 0.0 for match in matches]
+    thinking_parts = [extract_xml_thinking(r) for r in responses]
+    
+    rewards = []
+    for thinking in thinking_parts:
+        score = 0.0
+        
+        # 1. Length check - neither too short nor too long
+        length = len(thinking)
+        if length < MIN_ACCEPTABLE_REASONING_LENGTH:
+            length_score = 0.1  # Too short
+        elif length < OPTIMAL_REASONING_LENGTH:
+            length_score = 0.1 + 0.4 * (length - MIN_ACCEPTABLE_REASONING_LENGTH) / (OPTIMAL_REASONING_LENGTH - MIN_ACCEPTABLE_REASONING_LENGTH)
+        elif length <= MAX_REASONING_LENGTH:
+            length_score = 0.5 * (1 - (length - OPTIMAL_REASONING_LENGTH) / (MAX_REASONING_LENGTH - OPTIMAL_REASONING_LENGTH))
+        else:
+            length_score = 0.1  # Too long
+        
+        score += length_score
+        
+        # 2. Check for reasoning indicators
+        indicator_count = sum(1 for indicator in reasoning_indicators if indicator in thinking.lower())
+        indicator_score = min(0.3, 0.05 * indicator_count)  # Cap at 0.3
+        score += indicator_score
+        
+        # 3. Check for structure - multiple sentences/steps
+        try:
+            sentences = sent_tokenize(thinking)
+            if len(sentences) >= 3:
+                structure_score = 0.2
+            elif len(sentences) == 2:
+                structure_score = 0.1
+            else:
+                structure_score = 0.0
+            score += structure_score
+        except:
+            # Fallback if nltk fails
+            newlines = thinking.count('\n')
+            score += min(0.2, 0.05 * newlines)
+        
+        rewards.append(score)
+    
+    return rewards
 
+def consistency_reward(completions, **kwargs) -> List[float]:
+    """Reward function that checks consistency between thinking and answer."""
+    responses = [completion[0]["content"] for completion in completions]
+    
+    rewards = []
+    for r in responses:
+        thinking = extract_xml_thinking(r)
+        answer = extract_xml_answer(r)
+        
+        if not thinking or not answer:
+            rewards.append(0.0)
+            continue
+        
+        # Check if answer appears in thinking or is derived from it
+        if answer in thinking:
+            rewards.append(0.3)  # Direct appearance
+        elif answer.lower() in thinking.lower():
+            rewards.append(0.2)  # Case-insensitive appearance
+        else:
+            # Check if the last sentence of thinking leads to the answer
+            try:
+                sentences = sent_tokenize(thinking)
+                if sentences and (answer in sentences[-1] or sentences[-1] in answer):
+                    rewards.append(0.3)  # Answer consistent with final conclusion
+                else:
+                    rewards.append(0.0)
+            except:
+                rewards.append(0.0)
+    
+    return rewards
 
-def count_xml(text) -> float:
-    count = 0.0
-    count -= len(text.split("<think>")[0]) * 0.001
-    if text.count("<think>\n") == 1:
-        count += 0.125
-    if text.count("\n</think>\n") == 1:
-        count += 0.125
-    if text.count("\n<answer>\n") == 1:
-        count += 0.125
-    if text.count("\n</answer>") == 1:
-        count += 0.125
-    count -= len(text.split("</answer>")[-1]) * 0.001
-    return count
-
-
-def xmlcount_reward(completions, **kwargs) -> list[float]:
-    contents = [completion[0]["content"] for completion in completions]
-    return [count_xml(c) for c in contents]
-
-
-def len_reward(completions: list[Dict[str, str]], answer: list[str], **kwargs) -> float:
-    """Compute length-based rewards to discourage overthinking and promote token efficiency.
-
-    Taken from from the Kimi 1.5 tech report: https://arxiv.org/abs/2501.12599
-
+def combined_reward(
+    completions: List[Dict], 
+    answer: List[str], 
+    weights: Dict[str, float] = None,
+    **kwargs
+) -> List[float]:
+    """
+    Combined reward function with configurable weights.
+    
     Args:
         completions: List of model completions
         answer: List of ground truth answers
-
+        weights: Dictionary of reward function weights
+        
     Returns:
-        List of rewards where:
-        - For correct answers: reward = 0.5 - (len - min_len)/(max_len - min_len)
-        - For incorrect answers: reward = min(0, 0.5 - (len - min_len)/(max_len - min_len))
+        List of combined reward scores
     """
-    # First check correctness of answers
-    correctness = correctness_reward(completions, answer)
-
-    # Calculate lengths
-    lengths = [len(completion[0]["content"]) for completion in completions]
-    min_len = min(lengths)
-    max_len = max(lengths)
-
-    # If all responses have the same length, return zero rewards
-    if max_len == min_len:
-        return [0.0] * len(completions)
-
-    rewards = []
-    for length, correctness in zip(lengths, correctness):
-        lambda_val = 0.5 - (length - min_len) / (max_len - min_len)
-        if correctness > 0:
-            reward = lambda_val
+    if weights is None:
+        weights = {
+            "correctness": 1.0,
+            "format": 0.5,
+            "reasoning": 0.8,
+            "consistency": 0.7,
+            "atype": 0.3,
+            "length": 0.4
+        }
+    
+    # Calculate individual rewards
+    correct_rewards = correctness_reward(completions, answer)
+    format_rewards = format_reward(completions)
+    reasoning_rewards = reasoning_quality_reward(completions)
+    consistency_rewards = consistency_reward(completions)
+    atype_rewards = atype_reward(completions)
+    
+    # Calculate length-based rewards with the new cosine approach
+    responses = [completion[0]["content"] for completion in completions]
+    thinking_parts = [extract_xml_thinking(r) for r in responses]
+    
+    length_rewards = []
+    for thinking, is_correct in zip(thinking_parts, [r > 0 for r in correct_rewards]):
+        length = len(thinking)
+        
+        if not is_correct:
+            length_rewards.append(0.0)
+            continue
+            
+        if length < MIN_ACCEPTABLE_REASONING_LENGTH:
+            # Too short
+            reward = 0.1
+        elif length < OPTIMAL_REASONING_LENGTH:
+            # Building up to optimal
+            normalized = (length - MIN_ACCEPTABLE_REASONING_LENGTH) / (OPTIMAL_REASONING_LENGTH - MIN_ACCEPTABLE_REASONING_LENGTH)
+            reward = 0.1 + 0.4 * normalized
         else:
-            reward = min(0, lambda_val)
-        rewards.append(float(reward))
-
-    return rewards
-
-
-def cosine_length_correctness_reward(
-    completions: list[dict],
-    answer: list[str],
-    len_cap: int = 64,
-    min_value_correct: float = 0.25,
-    max_value_correct: float = 1.0,
-    penalty_incorrect: float = -0.5,
-    **kwargs
-) -> list[float]:
-    """
-    Compute rewards for a list of completions based on answer correctness and answer length,
-    ensuring a minimum answer length (len_cap) for the highest reward.
-
-    Correct answers:
-      - For answers shorter than len_cap, the reward scales linearly from 0 up to max_value_correct.
-      - For answers at least as long as len_cap, the reward decays from max_value_correct (at len_cap)
-        to min_value_correct (for the longest answers) using a cosine transform.
-
-    Incorrect answers receive a fixed penalty regardless of length.
-
-    Args:
-        completions: List of dictionaries, each containing a "content" key with the answer text.
-        answer: The ground truth answer(s) (used by correctness_reward, assumed to return 1 for correct, 0 otherwise).
-        len_cap: Minimum acceptable answer length for optimal reward.
-        min_value_correct: Minimum reward for correct answers (when answer length is very long).
-        max_value_correct: Maximum reward for correct answers (when answer length == len_cap).
-        penalty_incorrect: Fixed penalty value for incorrect answers.
-
-    Returns:
-        A list of reward values corresponding to each completion.
-    """
-    # Assume correctness_reward returns a list of 1 (correct) or 0 (incorrect) for each completion.
-    correctness = correctness_reward(
-        completions, answer
-    )  # This function is assumed to exist.
-
-    # Determine maximum answer length from completions (for scaling longer answers)
-    lengths = [len(completion[0]["content"]) for completion in completions]
-    max_len = max(lengths)
-    rewards = []
-
-    for length, is_correct in zip(lengths, correctness):
-        if is_correct:
-            if length < len_cap:
-                # Penalize answers that are too short even if correct.
-                # Reward scales linearly with length up to len_cap.
-                reward = max_value_correct * (length / len_cap)
-            else:
-                # For answers longer than or equal to len_cap, use cosine decay.
-                # Normalize length between len_cap and max_len.
-                if max_len > len_cap:
-                    normalized = (length - len_cap) / (max_len - len_cap)
-                else:
-                    normalized = 0
-                # Cosine: highest (1) at len_cap and decays toward 0 at the longest answer.
-                cosine = math.cos(normalized * (math.pi / 2))
-                reward = (
-                    min_value_correct + (max_value_correct - min_value_correct) * cosine
-                )
-        else:
-            reward = penalty_incorrect
-
-        rewards.append(reward)
-
-    return rewards
+            # Beyond optimal - use cosine decay
+            normalized = min(1.0, (length - OPTIMAL_REASONING_LENGTH) / (MAX_REASONING_LENGTH - OPTIMAL_REASONING_LENGTH))
+            cosine = math.cos(normalized * (math.pi / 2))
+            reward = 0.5 * cosine
+            
+        length_rewards.append(reward)
+    
+    # Combine rewards with weights
+    combined_rewards = []
+    for i in range(len(completions)):
+        weighted_sum = (
+            weights["correctness"] * correct_rewards[i] +
+            weights["format"] * format_rewards[i] +
+            weights["reasoning"] * reasoning_rewards[i] +
+            weights["consistency"] * consistency_rewards[i] +
+            weights["atype"] * atype_rewards[i] +
+            weights["length"] * length_rewards[i]
+        )
+        combined_rewards.append(weighted_sum)
+    
+    return combined_rewards

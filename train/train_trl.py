@@ -9,11 +9,7 @@ from trl import GRPOConfig, GRPOTrainer, TrlParser, ModelConfig, SFTConfig, SFTT
 from rewards import (
     atype_reward,
     correctness_reward,
-    soft_format_reward,
-    strict_format_reward,
-    len_reward,
-    xmlcount_reward,
-    cosine_length_correctness_reward,
+    format_reward,
 )
 
 try:
@@ -27,6 +23,7 @@ class CustomArgs:
     use_liger: bool = False
     use_gradient_checkpointing: str = "unsloth"
     use_sft: bool = False
+    add_reasoning_tokens: bool = False
 
 
 @dataclass
@@ -86,7 +83,6 @@ def main(
             use_cache=False,
             torch_dtype=torch.bfloat16,
             attn_implementation=model_args.attn_implementation,
-            # fused_linear_cross_entropy=custom_args.use_sft,
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
@@ -99,7 +95,7 @@ def main(
 
     processing_class = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
     processing_class.pad_token = processing_class.eos_token
-    if not custom_args.use_sft:
+    if custom_args.add_reasoning_tokens:
         special_tokens = ["<think>", "</think>", "<answer>", "</answer>"]
         tokens_to_add = [
             token for token in special_tokens if token not in processing_class.get_vocab()
@@ -152,8 +148,7 @@ def main(
             eval_dataset=eval_dataset,
             reward_funcs=[
                 atype_reward,
-                strict_format_reward,
-                xmlcount_reward,
+                format_reward,
                 correctness_reward,
             ],
             args=training_args,

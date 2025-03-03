@@ -3,11 +3,11 @@
 # Dataset
 dataset_name: "dataset/hf_main_1mv_train"
 split: "train"
-system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>\n"
-task_prompt: "Format your answer with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
+system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n{detailed reasoning}\n</think>\n<answer>\n{final_answer}\n</answer>\n"
+task_prompt: "Format your final answer with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
 # Base Model
-model_name_or_path: checkpoints/Qwen2.5-3B-Instruct-SFT
-tokenizer_name: checkpoints/Qwen2.5-3B-Instruct-SFT
+model_name_or_path: Qwen/Qwen2.5-1.5B-Instruct
+tokenizer_name: Qwen/Qwen2.5-1.5B-Instruct
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
@@ -22,7 +22,7 @@ vllm_enable_prefix_caching: true
 lora_r: 32
 lora_target_modules:
   - "all-linear"
-  - "embed_tokens"
+  # - "embed_tokens"
   # - "lm_head"
   # - "q_proj"
   # - "k_proj"
@@ -40,10 +40,11 @@ use_liger: true
 use_liger_kernel: true
 
 # Training Args
+add_reasoning_tokens: false
 beta: 0.01
 temperature: 0.7
 per_device_train_batch_size: 24
-num_generations: 8
+num_generations: 16
 epsilon: 0.3
 gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
@@ -51,7 +52,7 @@ gradient_checkpointing_kwargs:
   use_reentrant: false
 gradient_checkpointing: true
 dataloader_prefetch_factor: 4
-dataloader_num_workers: 8
+dataloader_num_workers: 16
 dataloader_pin_memory: true
 group_by_length: true
 learning_rate: 3.e-5
@@ -79,8 +80,8 @@ max_completion_length: 1024
 max_steps: -1
 num_train_epochs: 1
 max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_grpo_qwen_3b_after_sft"
-run_name: "mv1_grpo_qwen_3b_after_sft"
+output_dir: "checkpoints/mv1_grpo_qwen_1.5b"
+run_name: "mv1_grpo_qwen_1"
 overwrite_output_dir: true
 report_to:
   - "wandb"

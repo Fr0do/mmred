@@ -176,7 +176,7 @@ async def process_row(
                     client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        temperature=1.5 if thinking else 0.0,
+                        temperature=0.7 if thinking else 0.0,
                         max_completion_tokens=2048 if thinking else 50,
                         extra_body=extra_body,
                     ),
