@@ -246,7 +246,7 @@ def main():
                 os.makedirs(models_output_dir)
                 
             # Generate heatmaps with filtered data
-            generate_heatmaps(filtered_data, models_output_dir, f"{args.exp_name} (Selected Models)")
+            generate_heatmaps(filtered_data, models_output_dir, f"{args.exp_name}")
         
         # Always generate the full heatmaps as well
         generate_heatmaps(data, output_dir, args.exp_name)

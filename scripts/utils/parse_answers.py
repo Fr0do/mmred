@@ -17,7 +17,7 @@ people_names = ["Nobody", "Daniel", "Mary", "Michael", "Sandra", "John"]
 
 # Define the regex pattern
 all_names = "|".join(room_names + people_names + ["\\d"])
-answer_pattern = rf"\b({all_names})\b"
+answer_pattern = rf"({all_names})"
 
 # Add a pattern for numeric answers with garbage
 numeric_pattern = r"[<>'\"`,.]*(\d+)"
@@ -161,7 +161,9 @@ def strip_until_first_brace(string):
     # If "</think>" is not found, return the original string
     if think_end == -1:
         return string
-    string = string.replace("</answer>", "").replace("<answer>", "")
+    else:
+        string = string[think_end:]
+    string = string.replace("</answer>", "").replace("<answer>", "").strip()
     # Find the position of the first "{" after "</think>"
     brace_start = string.find("{", think_end)
 
@@ -270,7 +272,7 @@ def main():
         print(f"Found {len(answers)} files to process")
 
     # Determine number of processes
-    num_processes = args.num_processes or max(1, mp.cpu_count() - 1)
+    num_processes = args.num_processes or min(len(answers), mp.cpu_count() - 1)
     
     if args.debug:
         print(f"Using {num_processes} processes")

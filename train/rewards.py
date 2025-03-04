@@ -27,42 +27,25 @@ reasoning_indicators = [
     "consider", "assume", "suppose", "let's", "we know"
 ]
 
-def extract_xml_answer(text: str) -> str:
-    """Extract answer from XML tags, with improved robustness."""
+def extract_xml_template(text: str, template="answer") -> str:
     try:
-        answer = re.search(r"<answer>(.*?)</answer>", text, re.DOTALL)
-        if answer:
-            return answer.group(1).strip()
+        template = re.search(rf"<{template}>(.*?)</{template}>", text, re.DOTALL)
+        if template:
+            return template.group(1).strip()
         else:
             # Fallback for malformed XML
-            parts = text.split("<answer>")
+            parts = text.split(f"<{template}>")
             if len(parts) > 1:
-                answer_part = parts[-1].split("</answer>")[0]
-                return answer_part.strip()
-            return ""
-    except Exception:
-        return ""
-
-def extract_xml_thinking(text: str) -> str:
-    """Extract thinking from XML tags."""
-    try:
-        thinking = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
-        if thinking:
-            return thinking.group(1).strip()
-        else:
-            # Fallback for malformed XML
-            parts = text.split("<think>")
-            if len(parts) > 1:
-                thinking_part = parts[-1].split("</think>")[0]
-                return thinking_part.strip()
+                template_part = parts[-1].split(f"</{template}>")[0]
+                return template_part.strip()
             return ""
     except Exception:
         return ""
 
 def correctness_reward(completions, answer, **kwargs) -> List[float]:
-    """Reward for correct answers, now with partial credit for near-misses."""
+    """Reward for correct answers with partial credit for near-misses."""
     responses = [completion[0]["content"] for completion in completions]
-    extracted_responses = [extract_xml_answer(r) for r in responses]
+    extracted_responses = [extract_xml_template(r, "answer") for r in responses]
     
     rewards = []
     for resp, ans in zip(extracted_responses, answer):
@@ -114,7 +97,7 @@ def string_similarity(a: str, b: str) -> float:
 def atype_reward(completions, **kwargs) -> List[float]:
     """Reward function for answer type validity with improved scoring."""
     responses = [completion[0]["content"] for completion in completions]
-    extracted_responses = [extract_xml_answer(r) for r in responses]
+    extracted_responses = [extract_xml_template(r, "answer") for r in responses]
     
     rewards = []
     for r in extracted_responses:
@@ -132,7 +115,10 @@ def atype_reward(completions, **kwargs) -> List[float]:
     return rewards
 
 def format_reward(completions, **kwargs) -> List[float]:
-    """Enhanced format reward that combines strict and soft checks with gradients."""
+    """Enhanced format reward that combines strict and soft checks with gradients.
+    
+    Now penalizes any content appearing before the <think> tag.
+    """
     responses = [completion[0]["content"] for completion in completions]
     
     strict_pattern = r"^<think>\n.*?\n</think>\n<answer>\n.*?\n</answer>$"
@@ -141,12 +127,15 @@ def format_reward(completions, **kwargs) -> List[float]:
     
     rewards = []
     for r in responses:
+        penalty = 0.0
+        if not r.lstrip().startswith("<think>"):
+            penalty = 0.05
         if re.match(strict_pattern, r, re.DOTALL | re.MULTILINE):
-            rewards.append(0.75)  # Perfect formatting
+            rewards.append(0.75 - penalty)  # Perfect formatting
         elif re.match(good_pattern, r, re.DOTALL | re.MULTILINE):
-            rewards.append(0.5)   # Good formatting
+            rewards.append(0.5 - penalty)   # Good formatting
         elif re.match(minimal_pattern, r, re.DOTALL | re.MULTILINE):
-            rewards.append(0.25)  # At least has the tags in order
+            rewards.append(0.25 - penalty)  # At least has the tags in order
         else:
             # Count tags for partial credit
             score = 0.0
@@ -156,14 +145,15 @@ def format_reward(completions, **kwargs) -> List[float]:
                 score += 0.1
             if r.find("<think>") < r.find("</think>") < r.find("<answer>") < r.find("</answer>"):
                 score += 0.05  # Tags in correct order
-            rewards.append(score)
+            rewards.append(score - penalty)
     
     return rewards
+
 
 def reasoning_quality_reward(completions, **kwargs) -> List[float]:
     """New reward function that evaluates the quality of reasoning."""
     responses = [completion[0]["content"] for completion in completions]
-    thinking_parts = [extract_xml_thinking(r) for r in responses]
+    thinking_parts = [extract_xml_template(r, "think") for r in responses]
     
     rewards = []
     for thinking in thinking_parts:
@@ -212,8 +202,8 @@ def consistency_reward(completions, **kwargs) -> List[float]:
     
     rewards = []
     for r in responses:
-        thinking = extract_xml_thinking(r)
-        answer = extract_xml_answer(r)
+        thinking = extract_xml_template(r, "think")
+        answer = extract_xml_template(r, "answer")
         
         if not thinking or not answer:
             rewards.append(0.0)
@@ -273,7 +263,7 @@ def combined_reward(
     
     # Calculate length-based rewards with the new cosine approach
     responses = [completion[0]["content"] for completion in completions]
-    thinking_parts = [extract_xml_thinking(r) for r in responses]
+    thinking_parts = [extract_xml_template(r, "think") for r in responses]
     
     length_rewards = []
     for thinking, is_correct in zip(thinking_parts, [r > 0 for r in correct_rewards]):

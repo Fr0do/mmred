@@ -52,8 +52,8 @@ schemas = {
 }
 
 THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
-First think about the reasoning process and then provide the user with the answer.
-Respond in the following format:\n<think>\n...\n</think>\n<answer>\n...\n</answer>
+First think about the reasoning process and then provide the user with the answer.\nRespond in the following format:
+<think>\n{detailed reasoning}\n</think>\n<answer>\n{final_answer}\n</answer>\n
 Format your answer with a single <value>, where <value> is:
 - A **single room name** (e.g., "Kitchen") for location answers.
 - A **number** (e.g., "3") for counting answers.
@@ -150,8 +150,8 @@ async def process_row(
 
     # Prepare extra body parameters
     extra_body = {
-        # "repetition_penalty": 1.0,
-        "min_p": 0.1,
+        "repetition_penalty": 1.1,
+        "min_p": 0.05,
     }
 
     if row.get("atype") in schemas and not thinking:
@@ -176,8 +176,8 @@ async def process_row(
                     client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        temperature=0.7 if thinking else 0.0,
-                        max_completion_tokens=2048 if thinking else 50,
+                        temperature=0.75 if thinking else 0.0,
+                        max_completion_tokens=1024 if thinking else 50,
                         extra_body=extra_body,
                     ),
                     timeout=timeout,
@@ -410,6 +410,7 @@ async def main_async(args):
         ~full_dataset.index.isin(completed_qids)
     ].reset_index()
     print(f"QA pairs remaining to process: {len(remaining_dataset)}")
+    print(f"Model type thinking: {args.thinking}")
 
     # Process remaining QA pairs
     if len(remaining_dataset) > 0:
