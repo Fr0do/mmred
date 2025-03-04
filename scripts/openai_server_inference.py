@@ -52,12 +52,18 @@ schemas = {
 }
 
 THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
-First think about the reasoning process and then provide the user with the answer.\nRespond in the following format:
-<think>\n{detailed reasoning}\n</think>\n<answer>\n{final_answer}\n</answer>\n
-Format your answer with a single <value>, where <value> is:
-- A **single room name** (e.g., "Kitchen") for location answers.
-- A **number** (e.g., "3") for counting answers.
-- A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions.
+First think about the reasoning process and then provide the user with the answer.
+Respond in the following format:
+<think>
+{detailed reasoning}
+</think>
+<answer>
+{final_answer}
+</answer>
+Format your final answer with a single <value>, where <value> is:
+- A **single room name** (e.g., 'Kitchen') for location answers.
+- A **number** (e.g., '3') for counting answers.
+- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
 """
 
 SYSTEM_PROMPT = """You are an assistant that analyzes sequences of human agents moving in an environment.
@@ -151,7 +157,9 @@ async def process_row(
     # Prepare extra body parameters
     extra_body = {
         "repetition_penalty": 1.1,
-        "min_p": 0.05,
+        "frequency_penalty": 0.25,
+        "presence_penalty": 0.25,
+        "min_p": 0.1,
     }
 
     if row.get("atype") in schemas and not thinking:
@@ -166,6 +174,13 @@ async def process_row(
         extra_body.update(
             {"stop_token_ids": [93532, 93653, 944, 93421, 1019, 93653, 93519]}
         )
+    if thinking:
+        extra_body.update(
+            {
+                "include_stop_str_in_output": True,
+                "stop": ["</answer>"],
+            }
+        )
 
     # Use semaphore for rate limiting
     async with semaphore:
@@ -176,8 +191,8 @@ async def process_row(
                     client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        temperature=0.75 if thinking else 0.0,
-                        max_completion_tokens=1024 if thinking else 50,
+                        temperature=0.7 if thinking else 0.0,
+                        max_completion_tokens=768 if thinking else 50,
                         extra_body=extra_body,
                     ),
                     timeout=timeout,

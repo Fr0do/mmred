@@ -1,0 +1,92 @@
+# Recipe for training a GRPO model on an 4xA100 GPU
+
+# Dataset
+dataset_name: "dataset/hf_main_1mv_train"
+split: "train"
+system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n{detailed reasoning}\n</think>\n<answer>\n{final_answer}\n</answer>\n"
+task_prompt: "Format your final answer with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
+# Base Model
+model_name_or_path: checkpoints/Qwen2.5-3B-Instruct-SFT
+tokenizer_name: checkpoints/Qwen2.5-3B-Instruct-SFT
+model_revision: main
+torch_dtype: bfloat16
+attn_implementation: flash_attention_2
+load_in_4bit: true
+fast_inference: true
+# gpu_memory_utilization: 0.75
+use_vllm: true
+vllm_gpu_memory_utilization: 0.85
+vllm_max_model_len: 4096
+vllm_enable_prefix_caching: true
+# Peft Model
+lora_r: 32
+lora_target_modules:
+  - "all-linear"
+  # - "embed_tokens"
+  # - "lm_head"
+  # - "q_proj"
+  # - "k_proj"
+  # - "v_proj"
+  # - "o_proj"
+  # - "gate_proj"
+  # - "up_proj"
+  # - "down_proj"
+lora_modules_to_save: null
+lora_alpha: 32
+lora_dropout: 0.05
+random_state: 42
+use_peft: true
+use_liger: true
+use_liger_kernel: true
+
+# Training Args
+add_reasoning_tokens: false
+beta: 0.01
+temperature: 0.7
+per_device_train_batch_size: 24
+num_generations: 12
+epsilon: 0.3
+gradient_accumulation_steps: 2
+use_gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+gradient_checkpointing: true
+dataloader_prefetch_factor: 4
+dataloader_num_workers: 16
+dataloader_pin_memory: true
+group_by_length: true
+learning_rate: 3.e-5
+weight_decay: 3.e-2
+adam_beta1: 0.9
+adam_beta2: 0.999
+warmup_ratio: 0.05
+lr_scheduler_type: cosine_with_min_lr
+lr_scheduler_kwargs:
+  min_lr_rate: 0.1
+optim: "adamw_torch"
+log_completions: true
+log_level: info
+logging_first_step: true
+logging_steps: 1
+logging_strategy: steps
+# eval_strategy: no
+# eval_steps: 128
+per_device_eval_batch_size: 16
+bf16_full_eval: true
+bf16: true
+fp16: false
+max_prompt_length: 1024
+max_completion_length: 1024
+max_steps: -1
+num_train_epochs: 1
+max_grad_norm: 1.0
+output_dir: "checkpoints/mv1_grpo_qwen_3b_after_sft_fix"
+run_name: "mv1_grpo_qwen_3b_after_sft_fix"
+overwrite_output_dir: true
+report_to:
+  - "wandb"
+seed: 42
+save_steps: 128
+save_total_limit: 8
+# hub_model_id: "dondo_sss/mmlong-grpo"
+# push_to_hub: true

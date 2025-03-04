@@ -127,9 +127,7 @@ def format_reward(completions, **kwargs) -> List[float]:
     
     rewards = []
     for r in responses:
-        penalty = 0.0
-        if not r.lstrip().startswith("<think>"):
-            penalty = 0.05
+        penalty = (r.lstrip().find("<think>") + r.rstrip().find("</answer>")) * 0.01
         if re.match(strict_pattern, r, re.DOTALL | re.MULTILINE):
             rewards.append(0.75 - penalty)  # Perfect formatting
         elif re.match(good_pattern, r, re.DOTALL | re.MULTILINE):
@@ -146,7 +144,7 @@ def format_reward(completions, **kwargs) -> List[float]:
             if r.find("<think>") < r.find("</think>") < r.find("<answer>") < r.find("</answer>"):
                 score += 0.05  # Tags in correct order
             rewards.append(score - penalty)
-    
+
     return rewards
 
 
