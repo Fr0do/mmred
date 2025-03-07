@@ -1,7 +1,7 @@
 compute_environment: LOCAL_MACHINE
 debug: false
-dynamo_config:
-  dynamo_backend: CUDAGRAPHS
+# dynamo_config:
+#   dynamo_backend: CUDAGRAPHS
 deepspeed_config:
   deepspeed_multinode_launcher: standard
   zero3_init_flag: false

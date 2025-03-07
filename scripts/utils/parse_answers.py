@@ -111,7 +111,7 @@ def validate_and_compare(row):
         # If this is a numeric answer, try to extract a number if it failed earlier
         if model == NumberAnswer and not isinstance(normalized_prediction, int):
             if isinstance(normalized_prediction, str):
-                numeric_match = re.search(r'\d+', normalized_prediction)
+                numeric_match = re.search(r"\d+", normalized_prediction)
                 if numeric_match:
                     normalized_prediction = int(numeric_match.group(0))
 
@@ -148,7 +148,7 @@ def parse_predicted_answer(predicted_answer):
             numeric_match = re.search(numeric_pattern, predicted_answer)
             if numeric_match:
                 return int(numeric_match.group(1))
-        
+
         # Otherwise try the original pattern
         match = re.search(answer_pattern, predicted_answer, flags=re.IGNORECASE)
         return match[0] if match else "None"
@@ -257,23 +257,23 @@ def main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument(
-        "--num_processes", 
-        type=int, 
-        default=None, 
-        help="Number of processes to use (default: number of CPU cores)"
+        "--num_processes",
+        type=int,
+        default=None,
+        help="Number of processes to use (default: number of CPU cores)",
     )
 
     args = parser.parse_args()
 
     # Paths to answer files
-    answers = glob.glob(f"{args.input_dir}/{args.exp_name}/qa_pairs_answers_*")
-    
+    answers = glob.glob(f"{args.input_dir}/{args.exp_name}/qa_pairs_answers_*.csv")
+
     if args.debug:
         print(f"Found {len(answers)} files to process")
 
     # Determine number of processes
     num_processes = args.num_processes or min(len(answers), mp.cpu_count() - 1)
-    
+
     if args.debug:
         print(f"Using {num_processes} processes")
 
@@ -281,10 +281,10 @@ def main():
     with mp.Pool(processes=num_processes) as pool:
         # Create a partial function with the debug argument
         process_func = partial(process_model_data, debug=args.debug)
-        
+
         # Process all files in parallel
         results = pool.map(process_func, answers)
-        
+
     # Filter out None results
     heatmap_data = [result for result in results if result is not None]
 
@@ -299,7 +299,7 @@ def main():
         # Save the results
         output_file = f"{args.output_dir}/{args.exp_name}_newest_results.csv"
         heatmap_data.to_csv(output_file)
-        
+
         if args.debug:
             print(f"Results saved to {output_file}")
     else:

@@ -5,12 +5,21 @@ from peft import LoraConfig, get_peft_model, TaskType
 from huggingface_hub import login
 from dataclasses import dataclass
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from trl import GRPOConfig, GRPOTrainer, TrlParser, ModelConfig, SFTConfig, SFTTrainer, DataCollatorForCompletionOnlyLM
+from trl import (
+    GRPOConfig,
+    GRPOTrainer,
+    TrlParser,
+    ModelConfig,
+    SFTConfig,
+    SFTTrainer,
+    DataCollatorForCompletionOnlyLM,
+)
 from rewards import (
     atype_reward,
     correctness_reward,
     format_reward,
 )
+from functools import partial
 
 try:
     from liger_kernel.transformers import AutoLigerKernelForCausalLM
@@ -24,6 +33,7 @@ class CustomArgs:
     use_gradient_checkpointing: str = "unsloth"
     use_sft: bool = False
     add_reasoning_tokens: bool = False
+    r1_format: bool = False
 
 
 @dataclass
@@ -35,10 +45,18 @@ class DatasetArgs:
     )
     task_prompt: str | None = "Answer with a single word or number."
     subset: str = "default"
+    subsample_train: float = 1.0
 
 
 def get_dataset(dataset_args: DatasetArgs, use_sft: bool) -> Dataset:
-    data = load_dataset(dataset_args.dataset_name, dataset_args.subset)[dataset_args.split]
+    data = load_dataset(dataset_args.dataset_name, dataset_args.subset)[
+        dataset_args.split
+    ]
+    if dataset_args.subsample_train < 1.0:
+        data = data.class_encode_column("qtype")
+        data = data.train_test_split(
+            train_size=dataset_args.subsample_train, seed=42, stratify_by_column="qtype"
+        )["train"]
     if use_sft:
         data = data.map(
             lambda x: {
@@ -98,7 +116,9 @@ def main(
     if custom_args.add_reasoning_tokens:
         special_tokens = ["<think>", "</think>", "<answer>", "</answer>"]
         tokens_to_add = [
-            token for token in special_tokens if token not in processing_class.get_vocab()
+            token
+            for token in special_tokens
+            if token not in processing_class.get_vocab()
         ]
         if tokens_to_add:
             processing_class.add_tokens(tokens_to_add)
@@ -119,38 +139,48 @@ def main(
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
     model.save_pretrained(training_args.output_dir)
-    training_args.use_liger = custom_args.use_liger
-    training_args.use_liger_kernel = custom_args.use_liger
+    training_args.use_liger = custom_args.use_liger or True
+    training_args.use_liger_kernel = custom_args.use_liger or True
 
     train_dataset = get_dataset(dataset_args, custom_args.use_sft)
-    dataset_args.split = "val"
-    val_dataset = get_dataset(dataset_args, custom_args.use_sft)
-    eval_dataset = {"val": val_dataset}
-    dataset_args.split = "test"
-    for i in [16, 32, 64]:
-        dataset_args.subset = f"seq_len_{i}"
-        eval_dataset |= {f"test_{dataset_args.subset}": get_dataset(dataset_args, custom_args.use_sft)}
     if custom_args.use_sft:
+        eval_dataset = {}
+        if training_args.do_eval:
+            dataset_args.split = "val"
+            val_dataset = get_dataset(dataset_args, custom_args.use_sft)
+            eval_dataset = {"val": val_dataset}
+            dataset_args.split = "test"
+            for i in [32, 64]:
+                dataset_args.subset = f"seq_len_{i}"
+                eval_dataset |= {
+                    f"test_{dataset_args.subset}": get_dataset(
+                        dataset_args, custom_args.use_sft
+                    )
+                }
         trainer = SFTTrainer(
             model=model,
             processing_class=processing_class,
-            data_collator=DataCollatorForCompletionOnlyLM(response_template="<|im_start|>assistant", tokenizer=processing_class),
+            data_collator=DataCollatorForCompletionOnlyLM(
+                response_template="<|im_start|>assistant", tokenizer=processing_class
+            ),
             train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
+            eval_dataset=eval_dataset if training_args.do_eval else None,
             args=training_args,
-            # compute_metrics=compute_metrics,
         )
     else:
+        reward_funcs = [
+            partial(atype_reward, r1_format=custom_args.r1_format),
+            partial(format_reward, r1_format=custom_args.r1_format),
+            partial(correctness_reward, r1_format=custom_args.r1_format),
+        ]
+        for reward_func in reward_funcs:
+            if not hasattr(reward_func, "__name__"):
+                reward_func.__name__ = reward_func.func.__name__
         trainer = GRPOTrainer(
             model=model,
             processing_class=processing_class,
             train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            reward_funcs=[
-                atype_reward,
-                format_reward,
-                correctness_reward,
-            ],
+            reward_funcs=reward_funcs,
             args=training_args,
         )
     trainer.train()

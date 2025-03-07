@@ -3,11 +3,19 @@
 # Dataset
 dataset_name: "dataset/hf_main_1mv_train"
 split: "train"
-system_prompt: "You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.\nFirst think about the reasoning process and then provide the user with the answer.\nRespond in the following format:\n<think>\n{detailed reasoning}\n</think>\n<answer>\n{final_answer}\n</answer>\n"
-task_prompt: "Format your final answer with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
+system_prompt: ""
+subsample_train: 1.0
+r1_format: true
+task_prompt: |
+  You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
+  First think about the reasoning process and then provide the user with the answer\n
+  Format your final answer with a {"answer": <value>}, where <value> is:
+    - A **single room name** (e.g., 'Kitchen') for location answers.
+    - A **number** (e.g., '3') for counting answers.
+    - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
 # Base Model
-model_name_or_path: checkpoints/Qwen2.5-3B-Instruct-SFT
-tokenizer_name: checkpoints/Qwen2.5-3B-Instruct-SFT
+model_name_or_path: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+tokenizer_name: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
@@ -15,7 +23,7 @@ load_in_4bit: true
 fast_inference: true
 # gpu_memory_utilization: 0.75
 use_vllm: true
-vllm_gpu_memory_utilization: 0.85
+vllm_gpu_memory_utilization: 0.89
 vllm_max_model_len: 4096
 vllm_enable_prefix_caching: true
 # Peft Model
@@ -41,11 +49,11 @@ use_liger_kernel: true
 
 # Training Args
 add_reasoning_tokens: false
-beta: 0.01
+beta: 0.05
 temperature: 0.7
 per_device_train_batch_size: 24
 num_generations: 12
-epsilon: 0.15
+epsilon: 0.25
 gradient_accumulation_steps: 1
 use_gradient_checkpointing: true
 gradient_checkpointing_kwargs:
@@ -55,15 +63,14 @@ dataloader_prefetch_factor: 4
 dataloader_num_workers: 16
 dataloader_pin_memory: true
 group_by_length: true
-learning_rate: 3.e-5
-weight_decay: 3.e-5
+learning_rate: 1.e-4
+weight_decay: 5.e-6
 adam_beta1: 0.9
-adam_beta2: 0.999
-warmup_ratio: 0.05
-lr_scheduler_type: cosine_with_min_lr
-lr_scheduler_kwargs:
-  min_lr_rate: 0.1
-optim: "adamw_torch"
+adam_beta2: 0.99
+# warmup_ratio: 0.05
+warmup_steps: 50
+lr_scheduler_type: constant_with_warmup
+optim: "schedule_free_adamw"
 log_completions: true
 log_level: info
 logging_first_step: true
@@ -79,9 +86,9 @@ max_prompt_length: 1024
 max_completion_length: 1024
 max_steps: -1
 num_train_epochs: 1
-max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_grpo_qwen_3b_after_sft_fix"
-run_name: "mv1_grpo_qwen_3b_after_sft_fix"
+max_grad_norm: 0.35
+output_dir: "checkpoints/mv1_grpo_qwen_7b_r1_stable"
+run_name: "mv1_grpo_qwen_7b_r1_stable"
 overwrite_output_dir: true
 report_to:
   - "wandb"

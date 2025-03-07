@@ -2,7 +2,7 @@ SEED = 0xBADFACE
 
 WIDTH, HEIGHT = 512, 512
 
-SEQ_LENGTHS = [1, 2, 4, 8, 16]  # [2 ** i for i in range(8)]
+SEQ_LENGTHS = [1, 2, 4, 8, 16, 32, 64, 128]  # [2 ** i for i in range(8)]
 N_QUESTIONS = 250
 
 ROOMS: list[str] = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]

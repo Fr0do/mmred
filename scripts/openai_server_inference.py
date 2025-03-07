@@ -11,13 +11,15 @@ from io import BytesIO
 from typing import List, Dict, Tuple, Union, Literal, Optional
 
 import pandas as pd
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
+from openai.lib._pydantic import to_strict_json_schema
 from PIL import Image
 import base64
 import requests
 from pydantic import BaseModel
 from tqdm.asyncio import tqdm_asyncio
 import hashlib
+import httpx
 
 from qgen.const import (
     ROOMS,
@@ -31,17 +33,17 @@ from qgen.const import (
 
 
 class RoomAnswer(BaseModel):
-    reasoning: Optional[str] = None
+    # reasoning: Optional[str] = None
     answer: Literal[*ROOMS]
 
 
 class NumberAnswer(BaseModel):
-    reasoning: Optional[str] = None
-    answer: int = 0
+    # reasoning: Optional[str] = None
+    answer: str = "0"
 
 
 class PersonAnswer(BaseModel):
-    reasoning: Optional[str] = None
+    # reasoning: Optional[str] = None
     answer: Literal[*CHARS, NOBODY] = NOBODY
 
 
@@ -51,20 +53,49 @@ schemas = {
     AnswerTypePerson: PersonAnswer.model_json_schema(),
 }
 
+strict_schemas = {
+    AnswerTypeRoom: {"schema": to_strict_json_schema(RoomAnswer)} | {"name": "room"},
+    AnswerTypeNumber: {"schema": to_strict_json_schema(NumberAnswer)}
+    | {"name": "number"},
+    AnswerTypePerson: {"schema": to_strict_json_schema(PersonAnswer)}
+    | {"name": "person"},
+}
+
+# THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
+# First think about the reasoning process and then provide the user with the answer.
+# Respond in the following format:
+# <think>
+# {detailed reasoning}
+# </think>
+# <answer>
+# {final_answer}
+# </answer>
+# Format your final answer with a single <value>, where <value> is:
+# - A **single room name** (e.g., 'Kitchen') for location answers.
+# - A **number** (e.g., '3') for counting answers.
+# - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
+# """
+
+# THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
+# First think about the reasoning process and then provide the user with the answer.
+# Respond in the following format:
+# <think>
+# {detailed reasoning}
+# </think>
+# { "answer": <value> }
+
+# Where <value> is:
+# - A **single room name** (e.g., "Kitchen") for location answers.
+# - A **number** (e.g., "3") for counting answers.
+# - A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions."""
+
+
 THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
-First think about the reasoning process and then provide the user with the answer.
-Respond in the following format:
-<think>
-{detailed reasoning}
-</think>
-<answer>
-{final_answer}
-</answer>
-Format your final answer with a single <value>, where <value> is:
-- A **single room name** (e.g., 'Kitchen') for location answers.
-- A **number** (e.g., '3') for counting answers.
-- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
-"""
+First think about the reasoning process and then provide the user with the answer.\n
+Format your final answer with a {"answer": <value>}, where <value> is:
+  - A **single room name** (e.g., 'Kitchen') for location answers.
+  - A **number** (e.g., '3') for counting answers.
+  - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."""
 
 SYSTEM_PROMPT = """You are an assistant that analyzes sequences of human agents moving in an environment.
 Format your response as a following json:
@@ -132,11 +163,14 @@ async def process_row(
     timeout: int = 600,
     max_retries: int = 2,
     thinking: bool = False,
+    for_offline: bool = False,
 ) -> Tuple[Dict, str]:
     # Prepare the content based on input type
     if use_text_input:
         key = "sequence_json" if "sequence_json" in row else "sequence_description"
         user_content = [{"type": "text", "text": get_text_sequence(row, key)}]
+        if thinking:
+            user_content[0]["text"] =  THINKING_PROMPT + '\n' + user_content[0]["text"]
         row_dict = row.drop(key).to_dict()
     else:
         try:
@@ -144,83 +178,129 @@ async def process_row(
             if not image_urls:
                 return row.to_dict(), "Error: No images found for the given sequence"
             sequence = [url | {"type": "image_url"} for url in image_urls]
-            user_content = sequence + [{"type": "text", "text": row["question"]}]
+            user_content = sequence + [{"type": "text", "text": THINKING_PROMPT + '\n' + row["question"] if thinking else row["question"]}]
             row_dict = row.to_dict()
         except Exception as e:
             return row.to_dict(), f"Error preparing images: {str(e)}"
 
     messages = [
-        {"role": "system", "content": THINKING_PROMPT if thinking else SYSTEM_PROMPT},
-        {"role": "user", "content": user_content},
+        {"role": "system", "content": "" if thinking else SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": user_content,
+        },
     ]
-
-    # Prepare extra body parameters
+    extra_kwargs = {}
     extra_body = {
         "repetition_penalty": 1.1,
-        "frequency_penalty": 0.25,
-        "presence_penalty": 0.25,
-        "min_p": 0.1,
+        "frequency_penalty": 0.05,
+        "presence_penalty": 0.05,
+        "min_p": 0.05,
+        "top_k": 60,
     }
-
-    if row.get("atype") in schemas and not thinking:
-        extra_body.update(
-            {
-                "guided_json": schemas[row["atype"]],
-                "guided_decoding_backend": "outlines",
-            }
-        )
-
-    if "Aria" in model_name:
-        extra_body.update(
-            {"stop_token_ids": [93532, 93653, 944, 93421, 1019, 93653, 93519]}
-        )
-    if thinking:
-        extra_body.update(
-            {
-                "include_stop_str_in_output": True,
-                "stop": ["</answer>"],
-            }
-        )
-
-    # Use semaphore for rate limiting
-    async with semaphore:
-        retry_count = 0
-        while retry_count <= max_retries:
-            try:
-                response = await asyncio.wait_for(
-                    client.chat.completions.create(
-                        model=model_name,
-                        messages=messages,
-                        temperature=0.7 if thinking else 0.0,
-                        max_completion_tokens=768 if thinking else 50,
-                        extra_body=extra_body,
-                    ),
-                    timeout=timeout,
+    if not for_offline:
+        # Prepare extra body parameters
+        if row.get("atype") in schemas and not thinking:
+            if "gemini" not in model_name and "4o" not in model_name:
+                extra_body.update(
+                    {
+                        "guided_json": schemas[row["atype"]],
+                        "guided_decoding_backend": "outlines",
+                    }
                 )
-                answer = response.choices[0].message.content
-                return row_dict, answer
-
-            except asyncio.TimeoutError:
-                retry_count += 1
-                if retry_count <= max_retries:
-                    wait_time = 2**retry_count  # Exponential backoff
-                    print(
-                        f"Request for qid={row.get('qid', 'unknown')} timed out. Retrying in {wait_time} seconds..."
+                if "Aria" in model_name:
+                    extra_body.update(
+                        {
+                            "stop_token_ids": [
+                                93532,
+                                93653,
+                                944,
+                                93421,
+                                1019,
+                                93653,
+                                93519,
+                            ]
+                        }
                     )
-                    await asyncio.sleep(wait_time)
-                else:
-                    return row_dict, "Error: Request timed out after multiple attempts"
-
-            except Exception as e:
-                retry_count += 1
-                if retry_count <= max_retries:
-                    wait_time = 2**retry_count
-                    print(
-                        f"Error for qid={row.get('qid', 'unknown')}: {e}. Retrying in {wait_time} seconds..."
+                if thinking:
+                    extra_body.update(
+                        {
+                            "include_stop_str_in_output": True,
+                            "stop": ["</answer>"],
+                        }
                     )
-                    await asyncio.sleep(wait_time)
-                else:
-                    return row_dict, f"Error after {max_retries} retries: {str(e)}"
+            else:
+                extra_kwargs = extra_body.copy()
+                extra_kwargs.update(
+                    {
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": strict_schemas[row["atype"]],
+                        },
+                    }
+                )
+                extra_body = None
+
+        # Use semaphore for rate limiting
+        async with semaphore:
+            retry_count = 0
+            while retry_count <= max_retries:
+                try:
+                    response = await asyncio.wait_for(
+                        client.chat.completions.create(
+                            model=model_name,
+                            messages=messages,
+                            temperature=0.6 if thinking else 0.0,
+                            max_completion_tokens=2048 if thinking else 50,
+                            extra_body=extra_body,
+                            **extra_kwargs,
+                        ),
+                        timeout=timeout,
+                    )
+                    answer = response.choices[0].message.content
+                    return row_dict, answer
+
+                except asyncio.TimeoutError:
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        wait_time = 2**retry_count  # Exponential backoff
+                        print(
+                            f"Request for qid={row.get('qid', 'unknown')} timed out. Retrying in {wait_time} seconds..."
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        return (
+                            row_dict,
+                            "Error: Request timed out after multiple attempts",
+                        )
+
+                except Exception as e:
+                    retry_count += 1
+                    if retry_count <= max_retries:
+                        wait_time = 2**retry_count
+                        print(
+                            f"Error for qid={row.get('qid', 'unknown')}: {e}. Retrying in {wait_time} seconds..."
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        return row_dict, f"Error after {max_retries} retries: {str(e)}"
+    else:
+        offline_task = {
+            "custom_id": f"text_{use_text_input}-qid-{row['qid']}",
+            "method": "POST",
+            "url": "/v1/chat/completions",
+            "body": {
+                "model": model_name,
+                "messages": messages,
+                "temperature": 0.7 if thinking else 0.0,
+                "max_completion_tokens": 768 if thinking else 50,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": strict_schemas[row["atype"]],
+                },
+            },
+        }
+        return offline_task
 
 
 async def test_connection(
@@ -342,7 +422,59 @@ async def process_dataset(
 
             # Optional: add a small delay between batches to prevent API rate limits
             f_out.flush()
-            await asyncio.sleep(0.01)
+
+
+async def create_task_batch(
+    dataset: pd.DataFrame,
+    data_path: Path,
+    output_csv: str,
+    client: OpenAI,
+    model_name: str,
+    semaphore_limit: int = 10,
+    use_text_input: bool = False,
+    thinking: bool = False,
+):
+    tasks = []
+    semaphore = asyncio.Semaphore(semaphore_limit)
+    timeout, max_retries, for_offline = 0, 0, True
+    for index, row in dataset.iterrows():
+        task = asyncio.create_task(
+            process_row(
+                row,
+                data_path,
+                client,
+                model_name,
+                semaphore,
+                use_text_input,
+                timeout,
+                max_retries,
+                thinking,
+                for_offline,
+            )
+        )
+        tasks.append(task)
+    task_jsons = []
+    task_file_name = (
+        output_csv.split(".csv")[0] + f"_is_text_{use_text_input}" + "_tasks.jsonl"
+    )
+    for coro in tqdm_asyncio.as_completed(
+        tasks,
+        leave=False,
+    ):
+        task_json = await coro
+        task_jsons.append(task_json)
+
+    with open(task_file_name, "a+") as file:
+        for task_json in task_jsons:
+            file.write(json.dumps(task_json) + "\n")
+
+    # # Upload file
+    # batch_file = client.files.create(file=open(task_file_name, "rb"), purpose="batch")
+
+    # # Create batch job
+    # batch_job = client.batches.create(
+    #     input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
+    # )
 
 
 def _load_dataset(data_path: Path, use_text_input: bool) -> pd.DataFrame:
@@ -368,7 +500,7 @@ def _get_completed_qids(output_csv: str) -> List[str]:
         reader = csv.DictReader(f)
         for row in reader:
             if "error" not in row["Predicted_Answer"].lower():
-                completed_seq_ids.append(row["qid"])
+                completed_seq_ids.append(str(row["qid"]).zfill(7))
     return completed_seq_ids
 
 
@@ -377,7 +509,20 @@ async def main_async(args):
         args.base_url = f"http://{args.host}:{args.port}{args.endpoint}"
 
     print(f"Connecting to API at {args.base_url}")
-    client = AsyncOpenAI(api_key=args.api_key, base_url=args.base_url)
+    if args.offline:
+        client = OpenAI(api_key=args.api_key, base_url=args.base_url)
+    else:
+        client = AsyncOpenAI(
+            http_client=(
+                httpx.AsyncClient(
+                    proxy="socks5://fb_lab:T2wO4gqgumHs@193.124.46.176:8080"
+                )
+                if "openai" in args.base_url
+                else None
+            ),
+            api_key=args.api_key.replace("\xad", ""),
+            base_url=args.base_url,
+        )
     if args.model_name:
         model_name = args.model_name
     else:
@@ -395,17 +540,17 @@ async def main_async(args):
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
         args.output_csv = os.path.join(
-            "data", args.exp_name, f"qa_pairs_answers_{model_format}.csv"
+            "data_cache", args.exp_name, f"qa_pairs_answers_{model_format}.csv"
         )
 
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
-
-    # Test connection before proceeding
-    connection_ok = await test_connection(client, model_name)
-    if not connection_ok:
-        print("Connection test failed")
-        return
+    if not args.offline:
+        # Test connection before proceeding
+        connection_ok = await test_connection(client, model_name)
+        if not connection_ok:
+            print("Connection test failed")
+            return
 
     # Load dataset
     use_text_input = args.text_json_path is not None
@@ -419,7 +564,7 @@ async def main_async(args):
     # Check for already completed QA pairs
     completed_qids = _get_completed_qids(args.output_csv)
     print(f"Already processed {len(completed_qids)} QA pairs.")
-
+    print(full_dataset.index[:50])
     # Filter out completed QIDs
     remaining_dataset = full_dataset.loc[
         ~full_dataset.index.isin(completed_qids)
@@ -429,21 +574,36 @@ async def main_async(args):
 
     # Process remaining QA pairs
     if len(remaining_dataset) > 0:
-        print(f"Writing output to {args.output_csv}")
-        await process_dataset(
-            remaining_dataset,
-            data_path,
-            args.output_csv,
-            client,
-            model_name,
-            args.semaphore_limit,
-            use_text_input,
-            args.batch_size,
-            args.timeout,
-            args.max_retries,
-            args.thinking,
-        )
-        print(f"Processing complete. Answers have been written to {args.output_csv}")
+        if args.offline:
+            print(f"Creating an offline jsonl batch for {args.output_csv}")
+            await create_task_batch(
+                remaining_dataset,
+                data_path,
+                args.output_csv,
+                client,
+                model_name,
+                args.semaphore_limit,
+                use_text_input,
+                args.thinking,
+            )
+        else:
+            print(f"Writing output to {args.output_csv}")
+            await process_dataset(
+                remaining_dataset,
+                data_path,
+                args.output_csv,
+                client,
+                model_name,
+                args.semaphore_limit,
+                use_text_input,
+                args.batch_size,
+                args.timeout,
+                args.max_retries,
+                args.thinking,
+            )
+            print(
+                f"Processing complete. Answers have been written to {args.output_csv}"
+            )
     else:
         print("No QA pairs remaining to process.")
 
@@ -502,8 +662,12 @@ def main():
         "--thinking", action="store_true", default=False, help="If model is a thinker"
     )
     parser.add_argument(
-        "--model_name", type=str, default=None, help="Model Name"
+        "--offline",
+        action="store_true",
+        default=False,
+        help="If inference is an offline batch",
     )
+    parser.add_argument("--model_name", type=str, default=None, help="Model Name")
     args = parser.parse_args()
 
     # Run the async main function

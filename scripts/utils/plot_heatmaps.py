@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import argparse
+from scipy.stats import hmean
 
 
 def load_data(filepath):
@@ -39,24 +40,28 @@ def filter_models(heatmap_data, models_list):
     """
     if not models_list:
         return heatmap_data
-    
+
     # Get all available models
     available_models = heatmap_data.index.get_level_values("model").unique().tolist()
-    
+
     # Check if specified models exist in the data
     valid_models = [model for model in models_list if model in available_models]
-    
+
     if not valid_models:
-        print(f"Warning: None of the specified models {models_list} found in data. Using all models.")
+        print(
+            f"Warning: None of the specified models {models_list} found in data. Using all models."
+        )
         return heatmap_data
-    
+
     if len(valid_models) < len(models_list):
         missing_models = set(models_list) - set(valid_models)
         print(f"Warning: Some models not found in data: {missing_models}")
-    
+
     # Filter data to include only specified models
-    filtered_data = heatmap_data[heatmap_data.index.get_level_values("model").isin(valid_models)]
-    
+    filtered_data = heatmap_data[
+        heatmap_data.index.get_level_values("model").isin(valid_models)
+    ]
+
     return filtered_data
 
 
@@ -104,7 +109,8 @@ def plot_heatmap(
     plt.title(title)
     plt.tight_layout()
     plt.xticks(rotation=rotation)
-    plt.savefig(output_path, bbox_inches="tight", dpi=300)
+    plt.savefig(output_path + ".png", bbox_inches="tight", dpi=300)
+    plt.savefig(output_path + ".pdf", bbox_inches="tight", dpi=300)
     plt.close()
 
 
@@ -117,8 +123,8 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
         output_dir (str): Directory to save the heatmaps.
         exp_name (str): Name of the experiment (used for plot titles).
     """
-    # custom_cmap = sns.color_palette("RdYlGn", as_cmap=True)
-    custom_cmap = sns.color_palette("PRGn", as_cmap=True)
+    custom_cmap = sns.color_palette("RdYlGn", as_cmap=True)
+    # custom_cmap = sns.color_palette("PRGn", as_cmap=True)
     # custom_cmap = sns.color_palette("Spectral", as_cmap=True)
 
     # Plot 1: Mean of all models
@@ -133,7 +139,7 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
         xlabel="Type of question",
         ylabel="Steps in context",
         title=f"{exp_name} Mean of all models",
-        output_path=os.path.join(output_dir, "mmlong_all_models.png"),
+        output_path=os.path.join(output_dir, "mmlong_all_models"),
         cmap=custom_cmap,
     )
 
@@ -151,7 +157,26 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
         xlabel="Type of question",
         ylabel="Model",
         title=f"{exp_name} Mean of all lengths",
-        output_path=os.path.join(output_dir, "mmlong_all_lengths.png"),
+        output_path=os.path.join(output_dir, "mmlong_all_lengths"),
+        cmap=custom_cmap,
+        rotation=-60,
+    )
+
+    # Plot 2.1: HMean of all lengths
+    mean_all_lengths = (
+        heatmap_data.groupby(["qtype", "model"])
+        .agg(hmean)
+        .reset_index()
+        .pivot(index="model", columns="qtype", values="hit")
+    )
+    sorted_columns = mean_all_lengths.mean().sort_values(ascending=False).index
+    mean_all_lengths = mean_all_lengths[sorted_columns]
+    plot_heatmap(
+        mean_all_lengths,
+        xlabel="Type of question",
+        ylabel="Model",
+        title=f"{exp_name} Harmonic Mean of all lengths",
+        output_path=os.path.join(output_dir, "mmlong_all_lengths_hmean"),
         cmap=custom_cmap,
         rotation=-60,
     )
@@ -170,7 +195,25 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
         xlabel="Model",
         ylabel="Steps in context",
         title=f"{exp_name} Mean of all questions",
-        output_path=os.path.join(output_dir, "mmlong_all_questions.png"),
+        output_path=os.path.join(output_dir, "mmlong_all_questions"),
+        cmap=custom_cmap,
+    )
+
+    # Plot 3.1: HMean of all questions
+    mean_all_questions = (
+        heatmap_data.groupby(["seq_len", "model"])
+        .agg(hmean)
+        .reset_index()
+        .pivot(index="seq_len", columns="model", values="hit")
+    )
+    sorted_columns = mean_all_questions.mean().sort_values(ascending=False).index
+    mean_all_questions = mean_all_questions[sorted_columns]
+    plot_heatmap(
+        mean_all_questions,
+        xlabel="Model",
+        ylabel="Steps in context",
+        title=f"{exp_name} Harmonic mean of all questions",
+        output_path=os.path.join(output_dir, "mmlong_all_questions_hmean"),
         cmap=custom_cmap,
     )
 
@@ -187,7 +230,7 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
             ylabel="Steps in context",
             title=f"{exp_name} {model}",
             output_path=os.path.join(
-                output_dir, f"mmlong_{'_'.join(model.split('/'))}.png"
+                output_dir, f"mmlong_{'_'.join(model.split('/'))}"
             ),
             cmap=custom_cmap,
         )
@@ -229,28 +272,28 @@ def main():
     try:
         # Load the data
         data = load_data(args.data_path)
-        
+
         # Apply model filtering if specified
         if args.models:
             print(f"Filtering data to include only these models: {args.models}")
             filtered_data = filter_models(data, args.models)
-            
+
             # Create a models suffix for output directory
             models_suffix = "_".join([m.split("/")[-1] for m in args.models[:3]])
             if len(args.models) > 3:
                 models_suffix += "_etc"
-            
+
             # Create a subdirectory for these specific models
             models_output_dir = os.path.join(output_dir, f"models_{models_suffix}")
             if not os.path.exists(models_output_dir):
                 os.makedirs(models_output_dir)
-                
+
             # Generate heatmaps with filtered data
             generate_heatmaps(filtered_data, models_output_dir, f"{args.exp_name}")
-        
+
         # Always generate the full heatmaps as well
         generate_heatmaps(data, output_dir, args.exp_name)
-        
+
     except Exception as e:
         print(f"An error occurred: {e}")
 
