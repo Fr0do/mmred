@@ -6,6 +6,7 @@ deepspeed_config:
   deepspeed_multinode_launcher: standard
   zero3_init_flag: false
   zero_stage: 1
+  grad_accum_dtype: fp32
 distributed_type: DEEPSPEED
 downcast_bf16: 'no'
 machine_rank: 0

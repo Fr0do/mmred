@@ -39,8 +39,7 @@ class RoomAnswer(BaseModel):
 
 class NumberAnswer(BaseModel):
     # reasoning: Optional[str] = None
-    answer: str = "0"
-
+    answer: int = 0
 
 class PersonAnswer(BaseModel):
     # reasoning: Optional[str] = None
@@ -192,16 +191,16 @@ async def process_row(
     ]
     extra_kwargs = {}
     extra_body = {
-        "repetition_penalty": 1.1,
-        "frequency_penalty": 0.05,
-        "presence_penalty": 0.05,
-        "min_p": 0.05,
-        "top_k": 60,
+        # "repetition_penalty": 1.1,
+        # "frequency_penalty": 0.05,
+        # "presence_penalty": 0.05,
+        # "min_p": 0.05,
+        # "top_k": 60,
     }
     if not for_offline:
         # Prepare extra body parameters
         if row.get("atype") in schemas and not thinking:
-            if "gemini" not in model_name and "4o" not in model_name:
+            if "gemini" not in model_name and "4o" not in model_name and "Llama-3.2" not in model_name:
                 extra_body.update(
                     {
                         "guided_json": schemas[row["atype"]],

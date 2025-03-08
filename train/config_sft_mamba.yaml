@@ -45,16 +45,13 @@ dataloader_prefetch_factor: 6
 dataloader_num_workers: 16
 dataloader_pin_memory: true
 group_by_length: true
-learning_rate: 3.e-4
-lora_learning_rate: 3.e-4
-weight_decay: 1.e-4
+learning_rate: 3.e-5
+weight_decay: 0.
 adam_beta1: 0.9
-adam_beta2: 0.999
+adam_beta2: 0.99
 warmup_ratio: 0.05
-lr_scheduler_type: cosine_with_min_lr
-lr_scheduler_kwargs:
-  min_lr_rate: 0.1
-optim: "adamw_torch"
+lr_scheduler_type: constant_with_warmup
+optim: "schedule_free_adamw"
 log_completions: true
 log_level: info
 logging_first_step: true
@@ -69,7 +66,7 @@ do_eval: false
 per_device_eval_batch_size: 8
 bf16_full_eval: true
 batch_eval_metrics: true
-max_grad_norm: 1.0
+max_grad_norm: 0.5
 output_dir: "checkpoints/mv1_sft_mamba_7b_lora"
 run_name: "mv1_sft_mamba_7b_lora"
 overwrite_output_dir: true
@@ -78,6 +75,6 @@ report_to:
 seed: 42
 save_strategy: epoch
 # save_steps: -1
-save_total_limit: 1
+save_total_limit: 5
 # hub_model_id: "dondo_sss/mmlong-grpo"
 # push_to_hub: true

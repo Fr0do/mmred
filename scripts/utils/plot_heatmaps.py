@@ -5,6 +5,33 @@ import os
 import argparse
 from scipy.stats import hmean
 
+qgen_map = {
+    'first_app': 'FA-FA-R',
+    'char_on_char_first_app': 'FA-CCFA-R',
+    'first_at_room': 'FA-FR-C',
+    'room_on_char_first_app': 'FA-RCFA-C',
+    'n_room_on_char_first_app': 'FA-NRFA-I',
+    'final_app': 'FI-FA-R',
+    'char_on_char_final_app': 'FI-CCFA-R',
+    'last_at_room': 'FI-LR-C',
+    'room_on_char_final_app': 'FI-RCFA-C',
+    'n_room_on_char_final_app': 'FI-NRFA-I',
+    'char_at_frame': 'FX-CF-R',
+    'room_at_frame': 'FX-RF-C',
+    'char_on_char_at_frame': 'FX-CCF-C',
+    'n_char_at_frame': 'FX-NCF-I',
+    'n_empty': 'FX-NE-I',
+    'room_empty': 'LC-RE-R',
+    'where_spend': 'LC-WS-R',
+    'crowded_room': 'LC-CR-R',
+    'who_spend': 'LC-WHS-C',
+    'spend_alone': 'LC-SA-C',
+    'spend_together': 'LC-ST-C',
+    'steps_in_room': 'LC-SR-I',
+    'rooms_visited': 'LC-RV-I',
+    'crowd_count': 'LC-CC-I'
+}
+
 
 def load_data(filepath):
     """
@@ -18,6 +45,7 @@ def load_data(filepath):
     """
     try:
         heatmap_data = pd.read_csv(filepath)
+        heatmap_data.loc[:, 'qtype'] = heatmap_data.qtype.apply(lambda x: qgen_map.get(x))
         heatmap_data = heatmap_data.reset_index().set_index(
             ["seq_len", "qtype", "model"]
         )
@@ -76,7 +104,7 @@ def plot_heatmap(
     cmap=None,
     vmin=0,
     vmax=100,
-    rotation=90,
+    rotation=-90,
 ):
     """
     Generic function to plot and save a heatmap.
@@ -102,10 +130,11 @@ def plot_heatmap(
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
+        annot_kws={'size': 16},
         cbar_kws={"label": "Accuracy"},
     )
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
+    plt.xlabel(xlabel, fontsize=18)
+    plt.ylabel(ylabel, fontsize=18)
     plt.title(title)
     plt.tight_layout()
     plt.xticks(rotation=rotation)
@@ -178,7 +207,6 @@ def generate_heatmaps(heatmap_data, output_dir, exp_name):
         title=f"{exp_name} Harmonic Mean of all lengths",
         output_path=os.path.join(output_dir, "mmlong_all_lengths_hmean"),
         cmap=custom_cmap,
-        rotation=-60,
     )
 
     # Plot 3: Mean of all questions
