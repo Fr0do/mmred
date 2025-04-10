@@ -1,13 +1,13 @@
 # Recipe for training an SFT model on an 4xA100 GPU
 
 # Dataset
-dataset_name: "dataset/hf_main_1mv_train"
+dataset_name: "/home/jovyan/shares/SR004.nfs2/chekalina/long-vqa/dataset/hf_main_1mv_imgs_train"
 split: "train"
 system_prompt: "You are a helpful AI Assistant."
 task_prompt: "Format your answer with a single <value>, where <value> is:\n- A **single room name** (e.g., 'Kitchen') for location answers.\n- A **number** (e.g., '3') for counting answers.\n- A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."
 # Base Model
-model_name_or_path: Qwen/Qwen2.5-3B-Instruct
-tokenizer_name: Qwen/Qwen2.5-3B-Instruct
+model_name_or_path: Qwen/Qwen2.5-VL-3B-Instruct
+tokenizer_name: Qwen/Qwen2.5-VL-3B-Instruct
 model_revision: main
 torch_dtype: bfloat16
 attn_implementation: flash_attention_2
@@ -21,8 +21,8 @@ lora_alpha: 32
 lora_dropout: 0.05
 random_state: 42
 use_peft: true
-use_liger: true
-use_liger_kernel: true
+use_liger: false
+use_liger_kernel: false
 use_sft: true
 
 # Training Args
@@ -57,11 +57,9 @@ max_steps: -1
 num_train_epochs: 5
 eval_strategy: epoch
 max_grad_norm: 1.0
-output_dir: "checkpoints/mv1_sft_qwen_3b_lora"
+output_dir: "checkpoints/mv1_sft_qwen_3b"
 run_name: "mv1_sft_qwen_3b_lora"
 overwrite_output_dir: true
-report_to:
-  - "wandb"
 seed: 42
 save_strategy: epoch
 # save_steps: -1
