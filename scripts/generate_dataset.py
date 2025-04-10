@@ -1,8 +1,9 @@
 import argparse
 from pathlib import Path
 
-from qgen.const import SEQ_LENGTHS
-from qgen.qgen import generate_questions, generate_videos
+from mmred.const import SEQ_LENGTHS
+from mmred.qgen.qgen import generate_questions
+from mmred.vgen.vgen import generate_videos
 
 
 def create_exp_structure(base_path, exp_name):

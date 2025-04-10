@@ -3,25 +3,22 @@ import asyncio
 import base64
 import csv
 import json
+import hashlib
+import httpx
 import os
-from pathlib import Path
-
 import requests
 from io import BytesIO
-from typing import List, Dict, Tuple, Union, Literal, Optional
+from pathlib import Path
+from PIL import Image
+from typing import List, Dict, Tuple, Union, Literal
 
 import pandas as pd
 from openai import AsyncOpenAI, OpenAI
 from openai.lib._pydantic import to_strict_json_schema
-from PIL import Image
-import base64
-import requests
 from pydantic import BaseModel
 from tqdm.asyncio import tqdm_asyncio
-import hashlib
-import httpx
 
-from qgen.const import (
+from mmred.const import (
     ROOMS,
     CHARS,
     NOBODY,
@@ -169,7 +166,7 @@ async def process_row(
         key = "sequence_json" if "sequence_json" in row else "sequence_description"
         user_content = [{"type": "text", "text": get_text_sequence(row, key)}]
         if thinking:
-            user_content[0]["text"] =  THINKING_PROMPT + '\n' + user_content[0]["text"]
+            user_content[0]["text"] = THINKING_PROMPT + '\n' + user_content[0]["text"]
         row_dict = row.drop(key).to_dict()
     else:
         try:

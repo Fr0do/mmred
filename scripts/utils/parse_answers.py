@@ -1,19 +1,22 @@
-import pandas as pd
+import argparse
+import glob
 import json
+import multiprocessing as mp
 import os
 import re
-import glob
 from ast import literal_eval
-from pydantic import BaseModel, ValidationError
-from typing import Optional, Set, Literal, Iterable
-from json_repair import repair_json
-import argparse
-import multiprocessing as mp
 from functools import partial
+from typing import Optional, Set, Literal, Iterable
+
+import pandas as pd
+from json_repair import repair_json
+from pydantic import BaseModel, ValidationError
+
+from mmred.const import ROOMS, CHARS, NOBODY
 
 # Define the Pydantic models
-room_names = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]
-people_names = ["Nobody", "Daniel", "Mary", "Michael", "Sandra", "John"]
+room_names = ROOMS
+people_names = [NOBODY, *CHARS]
 
 # Define the regex pattern
 all_names = "|".join(room_names + people_names + ["\\d"])

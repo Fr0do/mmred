@@ -5,7 +5,7 @@ import random
 import numpy as np
 import pandas as pd
 
-from qgen.const import CHARS, ROOMS
+from ..const import CHARS, ROOMS
 
 
 def inv1d_argmax(a):

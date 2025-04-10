@@ -1,9 +1,7 @@
-import random
-
 import numpy as np
 import pandas as pd
 
-from qgen.const import (
+from ..const import (
     CHARS,
     NOBODY,
     ROOMS,
@@ -11,11 +9,9 @@ from qgen.const import (
     AnswerTypeRoom,
     AnswerTypeNumber,
 )
-from qgen.utils import (
+from .utils import (
     inv1d_argmax,
     generate_sequence_df,
-    sample_comparison,
-    sample_steps,
     get_random_situation,
     get_random_mmlong,
 )
