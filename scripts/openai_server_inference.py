@@ -533,10 +533,11 @@ async def main_async(args):
             model_name = "default_model"
 
     # Set output path
+    use_text_input = args.text_json_path is not None
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
         args.output_csv = os.path.join(
-            "data_cache", args.exp_name, f"qa_pairs_answers_{model_format}.csv"
+            "data_cache", args.exp_name, f"qa_pairs_answers_{model_format}_text_{use_text_input}.csv"
         )
 
     # Create directory if it doesn't exist
@@ -549,7 +550,6 @@ async def main_async(args):
             return
 
     # Load dataset
-    use_text_input = args.text_json_path is not None
     data_path = (
         args.text_json_path if use_text_input else Path(args.data_path) / args.exp_name
     )
