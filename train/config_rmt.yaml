@@ -1,4 +1,4 @@
-# Recipe for training an SFT model on an 4xA100 GPU
+# Recipe for training an RMT model with LoRA and curriculum learning
 
 # Dataset
 dataset_name: "dataset/hf_main_1mv_train_full"
@@ -13,29 +13,40 @@ task_prompt: |
     - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
 
 # Base Model
-model_revision: main
 model_name_or_path: "Qwen/Qwen3-4B-Instruct-2507"
 dtype: bfloat16
 attn_implementation: flash_attention_2
 
-# max_seq_length: 8192
-# vllm_enable_prefix_caching: true
-
 # Peft Model
+use_peft: true
 lora_r: 32
 lora_target_modules: "all-linear"
+# - "q_proj"
+# - "k_proj"
+# - "v_proj"
+# - "o_proj"
 lora_modules_to_save: 
-  - "lm_head"
-  - "embed_tokens"
-  - ""
+  - "memory"
+  # - "lm_head"
+  # - "embed_tokens"
 lora_alpha: 32
 lora_dropout: 0.05
-use_peft: true
+
+# RMT args
+segment_size: 256
+num_mem_tokens: 64
+curriculum:
+  # - max_n_segments: 3
+  #   num_train_epochs: 3
+  # - max_n_segments: 5
+  #   num_train_epochs: 3
+  - max_n_segments: 10
+    num_train_epochs: 5
 
 # Training Args
-use_liger_kernel: true
-output_dir: "checkpoints/sft_qwen_4b_lora"
-run_name: "sft_qwen_4b_lora"
+use_liger_kernel: false
+output_dir: "checkpoints/rmt_qwen_4b_lora_format"
+run_name: "rmt_qwen_4b_lora_format"
 overwrite_output_dir: true
 per_device_train_batch_size: 16
 gradient_accumulation_steps: 1
@@ -44,8 +55,8 @@ gradient_checkpointing_kwargs:
   use_reentrant: False
 dataloader_num_workers: 16
 learning_rate: 5.e-5
-weight_decay: 5.e-5
-warmup_steps: 200
+weight_decay: 0.01
+warmup_ratio: 0.05
 lr_scheduler_type: "constant_with_warmup"
 optim: "schedule_free_adamw" # "adamw_torch"
 log_level: info
@@ -53,15 +64,16 @@ logging_first_step: true
 logging_steps: 1
 bf16: true
 bf16_full_eval: true
-num_train_epochs: 5
-max_steps: -1
+num_train_epochs: 1 # This will be overridden by curriculum
+# max_steps: 5
 eval_strategy: "epoch"
 # eval_steps: 500
-do_eval: false
+do_eval: true
 per_device_eval_batch_size: 16
 report_to:
   - "clearml"
 seed: 42
-save_strategy: "epoch"
+save_strategy: "steps"
+save_steps: 500
 save_total_limit: 5
 group_by_length: true

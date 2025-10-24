@@ -22,9 +22,9 @@ pip install -e .
 
 ## 🚀 How to Run
 
-### 1. Generate the Dataset
+### 1. (Re)Generate the Dataset
 
-```
+```bash
 python scripts/generate_dataset.py --base_path BASE_PATH --exp_name EXP_NAME
 ```
 
@@ -32,19 +32,19 @@ python scripts/generate_dataset.py --base_path BASE_PATH --exp_name EXP_NAME
 
 Edit vllm_servers.sh to specify your model(s), then run:
 
-```
+```bash
 bash vllm_servers.sh
 ```
 
 ### 3. Run Inference
 
-```
+```bash
 bash inference.sh
 ```
 
 ### 4. Parse Model Outputs
 
-```
+```bash
 python scripts/utils/parse_answers.py --exp_name EXP_NAME --input_dir path/to/inference_outputs.csv --output_dir results.csv
 ```
 

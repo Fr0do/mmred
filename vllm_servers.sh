@@ -3,9 +3,10 @@
 set -m
 
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-export VLLM_USE_V1=0
+export VLLM_USE_V1=1
 export VLLM_LOGGING_LEVEL="INFO"
 export VLLM_LOGITS_PROCESSOR_THREADS=128
+export HF_HOME="/workspace-SR004.nfs2/.cache/huggingface"
 export HF_TOKEN_PATH="/workspace-SR004.nfs2/kurkin/hf_key_read.txt"
 # export VLLM_ATTENTION_BACKEND="FLASHINFER"
 # export VLLM_FLASHINFER_FORCE_TENSOR_CORES=1
@@ -14,13 +15,14 @@ export WD="$(pwd)"
 
 # Common configuration for all models
 #   --max-num-partial-prefills 128 --max-long-partial-prefills 16 --max-num-batched-tokens 5120  --long_prefill_token_threshold 4096
-COMMON_ARGS="--no-enable-prefix-caching --enable-chunked-prefill False --max_num_seqs 128 --block-size 32 --dtype bfloat16 --max-seq-len-to-capture 8192 --allowed-local-media-path / --trust-remote-code --disable-log-requests --limit-mm-per-prompt image=128,video=0 --max-model-len 35000"
+COMMON_ARGS="--enable-prefix-caching --max_num_seqs 128 --block-size 32 --max-seq-len-to-capture 8192 --allowed-local-media-path / --trust-remote-code --disable-log-requests --limit-mm-per-prompt image=128,video=0 --max-model-len 35000"
 MM_PROCESSOR_KWARGS='{"max_dynamic_patch": 1}'
-COMMON_TEXT_ARGS="--enable-chunked-prefill False --no-enable-prefix-caching --max_num_seqs 128  --block-size 32 --dtype bfloat16 --max-seq-len-to-capture 8192 --allowed-local-media-path / --trust-remote-code --disable-log-requests --max-model-len 16000 --max-num-batched-tokens 8192"
+COMMON_TEXT_ARGS="--enable-prefix-caching --max_num_seqs 128  --block-size 32 --max-seq-len-to-capture 8192 --allowed-local-media-path / --trust-remote-code --max-model-len 16000 --max-num-batched-tokens 8192"
 
 (
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/rhymes-ai-Aria" vllm serve unsloth/Llama-3.2-11B-Vision-Instruct -tp 4 --gpu-memory-utilization 0.85 $COMMON_ARGS --port 8007 --max-model-len 35000 --model-impl=transformers &
-    #  CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/rhymes-ai-Aria" vllm serve rhymes-ai/Aria -tp 4 --gpu-memory-utilization 0.95 $COMMON_ARGS --port 8007 --max-model-len 35000 &
+    # 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/rhymes-ai-Aria" vllm serve rhymes-ai/Aria -tp 4 --gpu-memory-utilization 0.95 $COMMON_ARGS --port 8007 --max-model-len 35000 &
 
     # CUDA_VISIBLE_DEVICES=4,5,6,7 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2-VL-72B-Instruct" vllm serve Qwen/Qwen2-VL-72B-Instruct -tp 4 --gpu-memory-utilization 0.95 $COMMON_ARGS --port 8008 --mm-processor-kwargs '{"min_pixels": 4096, "max_pixels": 262144}' --max-num-batched-tokens 1300 --max-model-len 42000 --hf-overrides '{"max_position_embeddings": 42000}' &
 
@@ -55,9 +57,11 @@ COMMON_TEXT_ARGS="--enable-chunked-prefill False --no-enable-prefix-caching --ma
     # sleep 75
     # CUDA_VISIBLE_DEVICES=0 OUTLINES_CACHE_DIR="$WD/cache/gemma3-1b" vllm serve google/gemma-3-1b-it -tp 1 --gpu-memory-utilization 0.35 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 16000 --max-model-len 16000 & 
     # CUDA_VISIBLE_DEVICES=1 OUTLINES_CACHE_DIR="$WD/cache/gemma3-4b" vllm serve google/gemma-3-4b-it -tp 1 --gpu-memory-utilization 0.85 $COMMON_ARGS --port 8005 --max-num-batched-tokens 16000 --max-model-len 16000 & 
-    # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/gemma3-12b" vllm serve google/gemma-3-12b-it -tp 2 --gpu-memory-utilization 0.85 $COMMON_ARGS --port 8006 --max-num-batched-tokens 16000 --max-model-len 16000 & 
+    # CUDA_VISIBLE_DEVICES=3 OUTLINES_CACHE_DIR="$WD/cache/gemma3-12b" vllm serve google/gemma-3-12b-it -tp 1 --gpu-memory-utilization 0.85 $COMMON_TEXT_ARGS --port 8006 --max-num-batched-tokens 12000 --max-model-len 12000 & 
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/gemma3-27b" vllm serve google/gemma-3-27b-it -tp 4 --gpu-memory-utilization 0.85 $COMMON_ARGS --port 8005 --max-num-batched-tokens 16000 --max-model-len 16000 & 
-    # CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-7B-Instruct" vllm serve Qwen/Qwen2.5-7B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8002 --max-num-batched-tokens 8192 --max-model-len 13000 &
+
+    # CUDA_VISIBLE_DEVICES=2 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-7B-Instruct" vllm serve Qwen/Qwen2.5-3B-Instruct -tp 1 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8001 --max-num-batched-tokens 8192 --max-model-len 13000 &
+    # CUDA_VISIBLE_DEVICES=3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-7B-Instruct" vllm serve Qwen/Qwen2.5-7B-Instruct -tp 1 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8006 --max-num-batched-tokens 8192 --max-model-len 13000 &
     # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen/Qwen2.5-Coder-7B-Instruct" vllm serve Qwen/Qwen2.5-Coder-7B-Instruct -tp 2 --gpu-memory-utilization 0.3 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 4096 --max-model-len 13000 &
     # sleep 75
     # CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen-Qwen2.5-32B-Instruct" vllm serve Qwen/Qwen2.5-32B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8002 --max-num-batched-tokens 8192 --max-model-len 13000 &
@@ -74,14 +78,20 @@ COMMON_TEXT_ARGS="--enable-chunked-prefill False --no-enable-prefix-caching --ma
     # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-3B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-3B-Instruct-GRPO -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8005 --max-num-batched-tokens 8192 --max-model-len 10000 & 
     # CUDA_VISIBLE_DEVICES=0,1 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-7B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-7B-Instruct-GRPO -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8006 --max-num-batched-tokens 8192 --max-model-len 10000 & 
     # CUDA_VISIBLE_DEVICES=1 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-1.5B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-1.5B-Instruct-GRPO -tp 1 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8007 --max-num-batched-tokens 8192 --max-model-len 10000 & 
-    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-1.5B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-7B-Instruct-SFT-5-epochs -tp 4 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8007 --max-num-batched-tokens 8192 --max-model-len 10000 &
+    # CUDA_VISIBLE_DEVICES=2 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-1.5B-Instruct-GRPO" vllm serve checkpoints/Qwen2.5-7B-Instruct-SFT-5-epochs --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8007 --max-num-batched-tokens 8192 --max-model-len 10000 &
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-1.5B-Instruct-GRPO" vllm serve checkpoints/DeepSeek-R1-Distill-Qwen-7B-GRPO -tp 4 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8007 --max-num-batched-tokens 8192 --max-model-len 10000 & 
     #CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/DeepSeek-R1-Distill-Llama-70B" vllm serve Qwen/QwQ-32B -tp 4 --gpu-memory-utilization 0.9 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 8192 --max-model-len 12000 &
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/r1" vllm serve deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B -tp 4 --gpu-memory-utilization 0.45 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 8192 --max-model-len 13000 & 
-    CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/mistral" vllm serve mistralai/Mistral-Small-3.1-24B-Instruct-2503 -tp 4 --gpu-memory-utilization 0.65 $COMMON_TEXT_ARGS --port 8020 --max-num-batched-tokens 12000 --max-model-len 12000 &
-    sleep 50
-    CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/mamba" vllm serve checkpoints/Falcon3-Mamba-7B-Instruct-SFT-5-epochs-stable -tp 4 --gpu-memory-utilization 0.25 $COMMON_TEXT_ARGS --port 8021 --max-num-batched-tokens 12000 --max-model-len 12000 &
-    # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-3B-Instruct" vllm serve Qwen/Qwen2.5-3B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8005 --max-num-batched-tokens 8192 --max-model-len 10000 --max_lora_rank 32 --enable-lora --lora-modules mmlong-grpo-3b=checkpoints/mv1_grpo_qwen_3b_256 & 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/mistral" vllm serve mistralai/Mistral-Small-3.1-24B-Instruct-2503 -tp 4 --gpu-memory-utilization 0.65 $COMMON_TEXT_ARGS --port 8020 --max-num-batched-tokens 12000 --max-model-len 12000 &
+    # sleep 50
+    # VLLM_USE_V1=0 CUDA_VISIBLE_DEVICES=1 OUTLINES_CACHE_DIR="$WD/cache/mamba" vllm serve checkpoints/Falcon3-Mamba-7B-Instruct-SFT-5-epochs-stable --gpu-memory-utilization 0.25 --port 8004 --max-num-batched-tokens 12000 --max-model-len 12000 &
+    # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-3B-Instruct" vllm serve Qwen/Qwen2.5-3B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8005 --max-num-batched-tokens 8192 --max-model-len 10000 --max_lora_rank 32 --enable-lora --lora-modules mmlong-grpo-3b=checkpoints/mv1_grpo_qwen_3b_256 &
+    CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen" vllm serve Qwen/Qwen3-Next-80B-A3B-Thinking -tp 4 --gpu-memory-utilization 0.75 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 32000 --max-model-len 32768 --reasoning-parser qwen3 & 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-32" vllm serve Qwen/Qwen3-32B --gpu-memory-utilization 0.75 -tp 4 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 32000 --max-model-len 12000 & 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-32" vllm serve tiiuae/Falcon-H1-34B-Instruct --gpu-memory-utilization 0.75 -tp 4 $COMMON_TEXT_ARGS --no-enable-prefix-caching  --port 8003 --max-num-batched-tokens 24000 --max-model-len 24000 & 
+    # CUDA_VISIBLE_DEVICES=2 OUTLINES_CACHE_DIR="$WD/cache/Qwen-14" vllm serve Qwen/Qwen3-14B  --gpu-memory-utilization 0.75 $COMMON_TEXT_ARGS --port 8001 --max-num-batched-tokens 16384 --max-model-len 12000 & 
+    # CUDA_VISIBLE_DEVICES=3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-4" vllm serve Qwen/Qwen3-4B --gpu-memory-utilization 0.75 --enable-reasoning --reasoning-parser deepseek_r1 $COMMON_TEXT_ARGS --port 8004 --max-num-batched-tokens 16384 --max-model-len 16384 & 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-3" vllm serve /home/jovyan/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B/snapshots/4c446470ba0aec43e22ac1128f9ffd915f338ba3 -tp 4 --gpu-memory-utilization 0.75 --enable-reasoning --reasoning-parser deepseek_r1 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 16384 --max-model-len 16384 & 
     wait
 ) &
 
