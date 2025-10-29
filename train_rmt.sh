@@ -14,4 +14,4 @@ export CLEARML_LOG_MODEL=False
 source activate base
 conda activate kurkin_313_torch
 
-accelerate launch --config_file=train/deepspeed.yaml --num_processes 4 train/train_rmt_curriculum.py --config train/config_rmt.yaml
+accelerate launch --config_file=train/fsdp.yaml --num_processes 4 train/train_rmt_qwen.py --config train/config_rmt.yaml

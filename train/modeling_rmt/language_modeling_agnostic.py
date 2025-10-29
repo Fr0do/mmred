@@ -2,8 +2,8 @@ import math
 import torch
 from torch.nn import CrossEntropyLoss
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformers import PreTrainedModel
-
+from transformers import AutoConfig, AutoModelForCausalLM, PreTrainedModel  
+from peft import PeftModel
 
 class MemoryCell(torch.nn.Module):
     """Wraps a transformer model with learnable memory tokens."""
@@ -114,7 +114,16 @@ class RecurrentWrapper(PreTrainedModel):
         super().__init__(self.config)
         self.memory_cell = memory_cell
         self.rmt_config = rmt_kwargs
-    
+        
+    def merge_lora(self):
+        if isinstance(self.memory_cell.model, PeftModel):
+            return False
+        base_model = self.memory_cell.model.merge_and_unload()
+        self.memory_cell.model = base_model
+        self.config = base_model.config
+        self.config.rmt_config = self.rmt_config
+        self.config.memory_num_tokens = self.memory_cell.num_mem_tokens
+        return True
     
     def forward(
         self, input_ids, labels=None, inputs_embeds=None, attention_mask=None, output_attentions=None, output_hidden_states=None, **kwargs

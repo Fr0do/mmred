@@ -35,27 +35,27 @@ lora_dropout: 0.05
 # RMT args
 segment_size: 256
 num_mem_tokens: 64
-curriculum:
+# curriculum:
   # - max_n_segments: 3
   #   num_train_epochs: 3
   # - max_n_segments: 5
   #   num_train_epochs: 3
-  - max_n_segments: 10
-    num_train_epochs: 5
+max_n_segments: 3
 
 # Training Args
-use_liger_kernel: false
+use_liger_kernel: true
 output_dir: "checkpoints/rmt_qwen_4b_lora_format"
 run_name: "rmt_qwen_4b_lora_format"
 overwrite_output_dir: true
 per_device_train_batch_size: 16
+max_grad_norm: 1.0
 gradient_accumulation_steps: 1
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: False
 dataloader_num_workers: 16
 learning_rate: 5.e-5
-weight_decay: 0.01
+weight_decay: 0.005
 warmup_ratio: 0.05
 lr_scheduler_type: "constant_with_warmup"
 optim: "schedule_free_adamw" # "adamw_torch"
@@ -64,7 +64,7 @@ logging_first_step: true
 logging_steps: 1
 bf16: true
 bf16_full_eval: true
-num_train_epochs: 1 # This will be overridden by curriculum
+num_train_epochs: 5 # This will be overridden by curriculum
 # max_steps: 5
 eval_strategy: "epoch"
 # eval_steps: 500
@@ -73,7 +73,7 @@ per_device_eval_batch_size: 16
 report_to:
   - "clearml"
 seed: 42
-save_strategy: "steps"
-save_steps: 500
+save_strategy: "epoch"
+# save_steps: 500
 save_total_limit: 5
 group_by_length: true
