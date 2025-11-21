@@ -3,21 +3,17 @@
 set -m
 
 export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
-export VLLM_USE_V1=1
 export VLLM_LOGGING_LEVEL="INFO"
 export VLLM_LOGITS_PROCESSOR_THREADS=128
 export HF_HOME="/workspace-SR004.nfs2/.cache/huggingface"
 export HF_TOKEN_PATH="/workspace-SR004.nfs2/kurkin/hf_key_read.txt"
-# export VLLM_ATTENTION_BACKEND="FLASHINFER"
-# export VLLM_FLASHINFER_FORCE_TENSOR_CORES=1
-export VLLM_USE_FLASHINFER_SAMPLER=1
 export WD="$(pwd)"
 
 # Common configuration for all models
 #   --max-num-partial-prefills 128 --max-long-partial-prefills 16 --max-num-batched-tokens 5120  --long_prefill_token_threshold 4096
-COMMON_ARGS="--enable-prefix-caching --max_num_seqs 128 --block-size 32 --max-seq-len-to-capture 8192 --allowed-local-media-path / --trust-remote-code --disable-log-requests --limit-mm-per-prompt image=128,video=0 --max-model-len 35000"
+COMMON_ARGS="--enable-prefix-caching --max_num_seqs 128 --block-size 32 --allowed-local-media-path / --trust-remote-code --disable-log-requests --limit-mm-per-prompt image=128,video=0 --max-model-len 35000"
 MM_PROCESSOR_KWARGS='{"max_dynamic_patch": 1}'
-COMMON_TEXT_ARGS="--enable-prefix-caching --max_num_seqs 128  --block-size 32 --max-seq-len-to-capture 8192 --allowed-local-media-path / --trust-remote-code --max-model-len 16000 --max-num-batched-tokens 8192"
+COMMON_TEXT_ARGS="--enable-prefix-caching --max_num_seqs 128  --block-size 32 --allowed-local-media-path / --trust-remote-code --max-model-len 16000 --max-num-batched-tokens 8192"
 
 (
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/rhymes-ai-Aria" vllm serve unsloth/Llama-3.2-11B-Vision-Instruct -tp 4 --gpu-memory-utilization 0.85 $COMMON_ARGS --port 8007 --max-model-len 35000 --model-impl=transformers &
@@ -86,7 +82,8 @@ COMMON_TEXT_ARGS="--enable-prefix-caching --max_num_seqs 128  --block-size 32 --
     # sleep 50
     # VLLM_USE_V1=0 CUDA_VISIBLE_DEVICES=1 OUTLINES_CACHE_DIR="$WD/cache/mamba" vllm serve checkpoints/Falcon3-Mamba-7B-Instruct-SFT-5-epochs-stable --gpu-memory-utilization 0.25 --port 8004 --max-num-batched-tokens 12000 --max-model-len 12000 &
     # CUDA_VISIBLE_DEVICES=2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen2.5-3B-Instruct" vllm serve Qwen/Qwen2.5-3B-Instruct -tp 2 --gpu-memory-utilization 0.89 $COMMON_TEXT_ARGS --port 8005 --max-num-batched-tokens 8192 --max-model-len 10000 --max_lora_rank 32 --enable-lora --lora-modules mmlong-grpo-3b=checkpoints/mv1_grpo_qwen_3b_256 &
-    CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen" vllm serve Qwen/Qwen3-Next-80B-A3B-Thinking -tp 4 --gpu-memory-utilization 0.75 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 32000 --max-model-len 32768 --reasoning-parser qwen3 & 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen" vllm serve Qwen/Qwen3-Next-80B-A3B-Thinking -tp 4 --gpu-memory-utilization 0.75 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 32000 --max-model-len 32768 --reasoning-parser qwen3 & 
+    CUDA_VISIBLE_DEVICES=0 OUTLINES_CACHE_DIR="$WD/cache/Qwen" vllm serve checkpoints/sft_qwen_4b_full -tp 1 --gpu-memory-utilization 0.75 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 12000 & 
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-32" vllm serve Qwen/Qwen3-32B --gpu-memory-utilization 0.75 -tp 4 $COMMON_TEXT_ARGS --port 8003 --max-num-batched-tokens 32000 --max-model-len 12000 & 
     # CUDA_VISIBLE_DEVICES=0,1,2,3 OUTLINES_CACHE_DIR="$WD/cache/Qwen-32" vllm serve tiiuae/Falcon-H1-34B-Instruct --gpu-memory-utilization 0.75 -tp 4 $COMMON_TEXT_ARGS --no-enable-prefix-caching  --port 8003 --max-num-batched-tokens 24000 --max-model-len 24000 & 
     # CUDA_VISIBLE_DEVICES=2 OUTLINES_CACHE_DIR="$WD/cache/Qwen-14" vllm serve Qwen/Qwen3-14B  --gpu-memory-utilization 0.75 $COMMON_TEXT_ARGS --port 8001 --max-num-batched-tokens 16384 --max-model-len 12000 & 

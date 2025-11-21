@@ -73,9 +73,7 @@ def extract_xml_template(text: str, template="answer", r1_format=False) -> str:
 
 def correctness_reward(completions, answer, r1_format=False, **kwargs) -> List[float]:
     responses = [completion[0]["content"] for completion in completions]
-    extracted_responses = [
-        extract_xml_template(r, "answer", r1_format) for r in responses
-    ]
+    extracted_responses = [extract_xml_template(r, "answer", r1_format) for r in responses]
     rewards = []
     for resp, ans in zip(extracted_responses, answer):
         resp, ans = resp.strip().replace('"', ""), ans.strip()
@@ -97,9 +95,7 @@ def correctness_reward(completions, answer, r1_format=False, **kwargs) -> List[f
 def atype_reward(completions, r1_format=False, **kwargs) -> List[float]:
     """Reward function for answer type validity with improved scoring."""
     responses = [completion[0]["content"] for completion in completions]
-    extracted_responses = [
-        extract_xml_template(r, "answer", r1_format) for r in responses
-    ]
+    extracted_responses = [extract_xml_template(r, "answer", r1_format) for r in responses]
     rewards = []
     for r in extracted_responses:
         r = r.strip().replace('"', "")
@@ -183,20 +179,14 @@ def reasoning_quality_reward(completions, **kwargs) -> List[float]:
                 OPTIMAL_REASONING_LENGTH - MIN_ACCEPTABLE_REASONING_LENGTH
             )
         elif length <= MAX_REASONING_LENGTH:
-            length_score = 0.5 * (
-                1
-                - (length - OPTIMAL_REASONING_LENGTH)
-                / (MAX_REASONING_LENGTH - OPTIMAL_REASONING_LENGTH)
-            )
+            length_score = 0.5 * (1 - (length - OPTIMAL_REASONING_LENGTH) / (MAX_REASONING_LENGTH - OPTIMAL_REASONING_LENGTH))
         else:
             length_score = 0.1  # Too long
 
         score += length_score
 
         # 2. Check for reasoning indicators
-        indicator_count = sum(
-            1 for indicator in reasoning_indicators if indicator in thinking.lower()
-        )
+        indicator_count = sum(1 for indicator in reasoning_indicators if indicator in thinking.lower())
         indicator_score = min(0.3, 0.05 * indicator_count)  # Cap at 0.3
         score += indicator_score
 
@@ -303,16 +293,13 @@ def combined_reward(
             reward = 0.1
         elif length < OPTIMAL_REASONING_LENGTH:
             # Building up to optimal
-            normalized = (length - MIN_ACCEPTABLE_REASONING_LENGTH) / (
-                OPTIMAL_REASONING_LENGTH - MIN_ACCEPTABLE_REASONING_LENGTH
-            )
+            normalized = (length - MIN_ACCEPTABLE_REASONING_LENGTH) / (OPTIMAL_REASONING_LENGTH - MIN_ACCEPTABLE_REASONING_LENGTH)
             reward = 0.1 + 0.4 * normalized
         else:
             # Beyond optimal - use cosine decay
             normalized = min(
                 1.0,
-                (length - OPTIMAL_REASONING_LENGTH)
-                / (MAX_REASONING_LENGTH - OPTIMAL_REASONING_LENGTH),
+                (length - OPTIMAL_REASONING_LENGTH) / (MAX_REASONING_LENGTH - OPTIMAL_REASONING_LENGTH),
             )
             cosine = math.cos(normalized * (math.pi / 2))
             reward = 0.5 * cosine

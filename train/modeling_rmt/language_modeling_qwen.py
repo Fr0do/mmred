@@ -122,8 +122,9 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
 
         logit_start = self.num_mem_tokens
         logit_end = -self.num_mem_tokens if write_mem else None
-
+        # print(model_outputs.logits[0])
         out["logits"] = model_outputs.logits[:, logit_start:logit_end]
+        # print(out["logits"][0])
         if output_hidden_states:
             out["hidden_states"] = [hs[:, logit_start:logit_end] for hs in model_outputs.hidden_states]
         if model_outputs.attentions is not None:
@@ -147,7 +148,8 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
             write_mem=write_mem,
             output_attentions=kwargs.get("output_attentions"),
         )
-        base_outputs = super().forward(labels=None, **seg_kwargs, **kwargs)
+        filtered_seg_kwargs = {k: v for k, v in seg_kwargs.items() if k not in kwargs}
+        base_outputs = super().forward(labels=None, **filtered_seg_kwargs, **kwargs)
         return self._process_segment_output(base_outputs, write_mem=write_mem, output_hidden_states=output_hidden_states)
 
     def segment(self, **kwargs: torch.Tensor) -> List[Dict[str, torch.Tensor]]:
@@ -190,7 +192,6 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         out = CausalLMOutputWithPast()
         logits = torch.cat([output.logits for output in cell_outputs], dim=1)
         out["logits"] = logits
-
         if labels is not None:
             shift_labels = labels[..., 1:].contiguous()
             shift_logits = logits[..., :-1, :].contiguous()
@@ -236,7 +237,7 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         **kwargs: Any,
     ) -> CausalLMOutputWithPast:
         segment_size = getattr(self.config, "segment_size", None)
-        if segment_size in {None, 0}:
+        if segment_size in {None, 0} or getattr(self, '_use_original_forward', False):
             return super().forward(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -286,6 +287,7 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
             return tuple(v for v in out.to_tuple() if v is not None)
         return out
 
+    @torch.no_grad()
     def generate(
         self,
         input_ids: Optional[torch.LongTensor] = None,
@@ -306,7 +308,6 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
                 output_hidden_states=True,
                 output_attentions=False,
             )
-            memory_state = self._manage_gradients(memory_state, seg_num)
 
         final_segment = segmented[-1]
         seg_kwargs = self._prepare_segment_inputs(
@@ -315,11 +316,15 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
             write_mem=False,
             output_attentions=False,
         )
-        return super().generate(
+        # print(seg_kwargs["inputs_embeds"].shape,seg_kwargs.get("attention_mask").shape)
+        self._use_original_forward = True
+        generation_output = super().generate(
             inputs_embeds=seg_kwargs["inputs_embeds"],
             attention_mask=seg_kwargs.get("attention_mask"),
             **generate_kwargs,
         )
+        self._use_original_forward = False
+        return generation_output
 
 try:
     AutoConfig.register(RMTQwen3Config.model_type, RMTQwen3Config)
