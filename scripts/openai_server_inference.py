@@ -10,7 +10,7 @@ import requests
 from io import BytesIO
 from pathlib import Path
 from PIL import Image
-from typing import List, Dict, Tuple, Union, Literal
+from typing import List, Dict, Tuple, Union, Literal, Optional
 
 import pandas as pd
 from openai import AsyncOpenAI, OpenAI
@@ -75,6 +75,49 @@ Where <value> is:
 - A **number** (e.g., "3") for counting answers.
 - A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions."""
 
+IN_CONTEXT_HEADER = (
+    "Here are example sequences with their questions and answers for reference:"
+)
+
+
+def format_sequence_json(sequence_json: List[Dict[str, str]]) -> str:
+    sequence_lines = []
+    for idx, frame in enumerate(sequence_json, 1):
+        frame_desc = ", ".join(f"{char}: {room}" for char, room in frame.items())
+        sequence_lines.append(f"Step {idx}: {frame_desc}")
+    return "\n".join(sequence_lines)
+
+
+def build_in_context_prompt(
+    row: pd.Series,
+    in_context_examples: Optional[List[Dict]],
+    max_examples: int,
+    max_len: int
+) -> str:
+    if not in_context_examples or max_examples <= 0:
+        return ""
+
+    qtype = row.get("qtype")
+    filtered_examples = [ex for ex in in_context_examples if ex.get("qtype") == qtype and ex.get("seq_len", 0) < max_len]
+    if not filtered_examples:
+        filtered_examples = in_context_examples
+
+    prompt_parts = [IN_CONTEXT_HEADER]
+    for idx, example in enumerate(filtered_examples[:max_examples], 1):
+        sequence_render = format_sequence_json(example.get("sequence_json", []))
+        prompt_parts.append(
+            "\n".join(
+                [
+                    f"Example {idx} (len={example.get('seq_len', 'N/A')}):",
+                    f"Sequence:\n{sequence_render}",
+                    f"Question: {example.get('question', '')}",
+                    f"Answer: \{'answer': '{example.get('answer', '')}'\}",
+                ]
+            )
+        )
+
+    return "\n\n".join(prompt_parts)
+
 
 def encode_image_base64(image: Union[str, Image.Image]) -> str:
     """encode raw date to base64 format."""
@@ -135,11 +178,18 @@ async def process_row(
     thinking: bool = False,
     prefix_question: bool = False,
     for_offline: bool = False,
+    in_context_examples: Optional[List[Dict]] = None,
+    max_in_context: int = 0,
 ) -> Tuple[Dict, str]:
     # Prepare the content based on input type
+    in_context_prompt = build_in_context_prompt(
+        row, in_context_examples, max_in_context, row['seq_len']
+    )
     if use_text_input:
         key = "sequence_json" if "sequence_json" in row else "sequence_description"
         user_text = get_text_sequence(row, key, prefix_question=prefix_question)
+        if in_context_prompt:
+            user_text = f"{in_context_prompt}\n\n{user_text}"
         if thinking:
             user_text = THINKING_PROMPT + '\n' + user_text
         user_content = [{"type": "text", "text": user_text}]
@@ -151,6 +201,8 @@ async def process_row(
                 return row.to_dict(), "Error: No images found for the given sequence"
             sequence = [url | {"type": "image_url"} for url in image_urls]
             question_text = THINKING_PROMPT + '\n' + row["question"] if thinking else row["question"]
+            if in_context_prompt:
+                question_text = f"{in_context_prompt}\n\n{question_text}"
             if prefix_question:
                 user_content = [{"type": "text", "text": question_text}] + sequence
             else:
@@ -332,6 +384,8 @@ async def process_dataset(
     max_retries: int = 2,
     thinking: bool = False,
     prefix_question: bool = False,
+    in_context_examples: Optional[List[Dict]] = None,
+    max_in_context: int = 0,
 ):
 
     semaphore = asyncio.Semaphore(semaphore_limit)
@@ -372,6 +426,8 @@ async def process_dataset(
                     max_retries,
                     thinking,
                     prefix_question,
+                    in_context_examples,
+                    max_in_context,
                 )
             )
             tasks.append(task)
@@ -409,6 +465,8 @@ async def create_task_batch(
     use_text_input: bool = False,
     thinking: bool = False,
     prefix_question: bool = False,
+    in_context_examples: Optional[List[Dict]] = None,
+    max_in_context: int = 0,
 ):
     tasks = []
     semaphore = asyncio.Semaphore(semaphore_limit)
@@ -427,6 +485,8 @@ async def create_task_batch(
                 thinking,
                 prefix_question,
                 for_offline,
+                in_context_examples,
+                max_in_context,
             )
         )
         tasks.append(task)
@@ -526,6 +586,20 @@ async def main_async(args):
         args.text_json_path if use_text_input else Path(args.data_path) / args.exp_name
     )
 
+    in_context_examples = None
+    if args.in_context:
+        default_ctx_path = Path(args.data_path) / args.exp_name / "in_context_examples.json"
+        context_path = Path(args.in_context_path) if args.in_context_path else default_ctx_path
+        if context_path.exists():
+            print(f"Loading in-context examples from {context_path}")
+            with open(context_path, "r") as f:
+                in_context_examples = json.load(f)
+            print(f"Loaded {len(in_context_examples)} in-context examples")
+        else:
+            print(
+                f"In-context path {context_path} not found. Continuing without in-context examples."
+            )
+
     full_dataset = _load_dataset(data_path, use_text_input)
     print(f"Total QA pairs to process: {len(full_dataset)}")
 
@@ -554,6 +628,8 @@ async def main_async(args):
                 use_text_input,
                 args.thinking,
                 args.prefix_question,
+                in_context_examples,
+                args.in_context_examples,
             )
         else:
             print(f"Writing output to {args.output_csv}")
@@ -570,6 +646,8 @@ async def main_async(args):
                 args.max_retries,
                 args.thinking,
                 args.prefix_question,
+                in_context_examples,
+                args.in_context_examples,
             )
             print(
                 f"Processing complete. Answers have been written to {args.output_csv}"
@@ -641,6 +719,23 @@ def main():
         help="If inference is an offline batch",
     )
     parser.add_argument("--model_name", type=str, default=None, help="Model Name")
+    parser.add_argument(
+        "--in_context",
+        action="store_true",
+        help="Append in-context examples to each prompt",
+    )
+    parser.add_argument(
+        "--in_context_path",
+        type=str,
+        default=None,
+        help="Path to in-context examples json. Defaults to <data_path>/<exp_name>/in_context_examples.json",
+    )
+    parser.add_argument(
+        "--in_context_examples",
+        type=int,
+        default=5,
+        help="Number of in-context examples to include per request",
+    )
     args = parser.parse_args()
 
     # Run the async main function
