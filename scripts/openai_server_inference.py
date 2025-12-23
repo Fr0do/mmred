@@ -80,14 +80,6 @@ IN_CONTEXT_HEADER = (
 )
 
 
-def format_sequence_json(sequence_json: List[Dict[str, str]]) -> str:
-    sequence_lines = []
-    for idx, frame in enumerate(sequence_json, 1):
-        frame_desc = ", ".join(f"{char}: {room}" for char, room in frame.items())
-        sequence_lines.append(f"Step {idx}: {frame_desc}")
-    return "\n".join(sequence_lines)
-
-
 def build_in_context_prompt(
     row: pd.Series,
     in_context_examples: Optional[List[Dict]],
@@ -98,24 +90,25 @@ def build_in_context_prompt(
         return ""
 
     qtype = row.get("qtype")
-    filtered_examples = [ex for ex in in_context_examples if ex.get("qtype") == qtype and ex.get("seq_len", 0) < max_len]
+    filtered_examples = [ex for ex in in_context_examples if ex.get("qtype") == qtype and ex.get("seq_len", 0) == max_len]
     if not filtered_examples:
         filtered_examples = in_context_examples
-
     prompt_parts = [IN_CONTEXT_HEADER]
-    for idx, example in enumerate(filtered_examples[:max_examples], 1):
-        sequence_render = format_sequence_json(example.get("sequence_json", []))
-        prompt_parts.append(
-            "\n".join(
-                [
-                    f"Example {idx} (len={example.get('seq_len', 'N/A')}):",
-                    f"Sequence:\n{sequence_render}",
-                    f"Question: {example.get('question', '')}",
-                    f"Answer: \{'answer': '{example.get('answer', '')}'\}",
-                ]
+    try:
+        for idx, example in enumerate(filtered_examples[:max_examples], 1):
+            sequence_render = "\n".join(str(frame) for frame in example["sequence_json"])
+            prompt_parts.append(
+                "\n".join(
+                    [
+                        f"Example {idx} (len={example.get('seq_len', 'N/A')}):",
+                        f"Question: {example.get('question', '')}",
+                        f"Sequence:\n{sequence_render}",
+                        f"Answer: {{'answer': '{example.get('answer', '')}'}}",
+                    ]
+                )
             )
-        )
-
+    except Exception as e:
+        print(e)
     return "\n\n".join(prompt_parts)
 
 
@@ -183,7 +176,7 @@ async def process_row(
 ) -> Tuple[Dict, str]:
     # Prepare the content based on input type
     in_context_prompt = build_in_context_prompt(
-        row, in_context_examples, max_in_context, row['seq_len']
+        row, in_context_examples, max_in_context, min(row['seq_len'], 16)
     )
     if use_text_input:
         key = "sequence_json" if "sequence_json" in row else "sequence_description"
@@ -248,7 +241,6 @@ async def process_row(
                     }
                 )
                 extra_body = None
-
         # Use semaphore for rate limiting
         async with semaphore:
             retry_count = 0
@@ -259,7 +251,7 @@ async def process_row(
                             model=model_name,
                             messages=messages,
                             temperature=0.6 if thinking else 0.0,
-                            max_completion_tokens=16384 if thinking else 50,
+                            max_completion_tokens=20000 if thinking else 50,
                             extra_body=extra_body,
                             **extra_kwargs,
                         ),
@@ -426,6 +418,7 @@ async def process_dataset(
                     max_retries,
                     thinking,
                     prefix_question,
+                    False,
                     in_context_examples,
                     max_in_context,
                 )
@@ -449,6 +442,14 @@ async def process_dataset(
                 leave=False,
             ):
                 qa_data, predicted_answer = await coro
+                # try:
+                #     out = await coro
+                #     qa_data, predicted_answer = out
+                # except Exception as e:
+                #     # log whatever identifies this task
+                #     print(e)
+                #     # optionally continue with next task
+                #     continue
                 writer.writerow(qa_data | {"Predicted_Answer": predicted_answer})
 
             # Optional: add a small delay between batches to prevent API rate limits

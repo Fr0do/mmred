@@ -94,7 +94,7 @@ def preprocess_function(example, ds_args: "DatasetArgs", tokenizer, segment_size
     )
     with_gen_and_dummy = tokenizer.apply_chat_template(
         messages + [{"role": "assistant", "content": "DUMMY"}],
-        add_generation_prompt=True, tokenize=True, return_dict=True
+        add_generation_prompt=False, tokenize=True, return_dict=True, enable_thinking=False,
     )
 
     base_ids = list(baseline.input_ids)  # up to end of user
@@ -202,6 +202,60 @@ def preprocess_function(example, ds_args: "DatasetArgs", tokenizer, segment_size
     }
 
 
+def preprocess_for_train(example, ds_args: "DatasetArgs", tokenizer, segment_size: int) -> Dict[str, Any]:
+    """
+    Constructs the prompt, appends the answer in the assistant role, 
+    and masks everything except the assistant's answer content.
+    """
+    # --- A. Construct Inputs ---
+    user_content_parts: List[str] = []
+    if ds_args.task_prompt:
+        user_content_parts.append(ds_args.task_prompt)
+    user_content_parts.append(example["question"])
+    steps = example["sequence_json"].replace("'", '"')
+    if isinstance(steps, str):
+        steps = json.loads(steps)
+    user_content_parts += [str(s) for s in steps]
+    user_content = "\n".join(user_content_parts)
+    
+    # Create the answer JSON string
+    answer_content = json.dumps({"answer": example["answer"]})
+
+    messages = [
+        {"role": "system", "content": ds_args.system_prompt or ""},
+        {"role": "user", "content": user_content},
+        {"role": "assistant", "content": answer_content}
+    ]
+    
+    # --- B. Tokenize Full Sequence ---
+    full_enc = tokenizer.apply_chat_template(
+        messages, 
+        tokenize=True, 
+        return_dict=True,
+        add_generation_prompt=False, 
+    )
+    input_ids = full_enc['input_ids']
+    attention_mask = full_enc['attention_mask']
+
+    # --- C. Find Mask Boundary ---
+    # To strictly mask the user prompt, we re-tokenize just the prompt part.
+    prompt_enc = tokenizer.apply_chat_template(
+        messages[:2], 
+        tokenize=True, 
+        return_dict=True,
+        add_generation_prompt=True 
+    )
+    prompt_len = len(prompt_enc['input_ids'])
+
+    # --- D. Create Labels ---
+    labels = [-100] * prompt_len + input_ids[prompt_len:]
+    return {
+        "input_ids": input_ids,
+        "attention_mask": attention_mask,
+        "labels": labels,
+        "length": len(input_ids),
+        "num_segments": len(input_ids) // segment_size + 1,
+    }
 
 
 def filter_by_max_segments(dataset, max_segments: Optional[int]):
@@ -247,12 +301,14 @@ if __name__ == "__main__":
     raw_val_ds = raw_ds[ds_args.val_split]
 
     processed_train_ds = raw_train_ds.map(
-        lambda ex: preprocess_function(ex, ds_args, tokenizer, rmt_args.segment_size),
+        lambda ex: preprocess_for_train(ex, ds_args, tokenizer, rmt_args.segment_size),
         remove_columns=raw_train_ds.column_names,
+        num_proc=8,
     )
     processed_val_ds = raw_val_ds.map(
-        lambda ex: preprocess_function(ex, ds_args, tokenizer, rmt_args.segment_size),
+        lambda ex: preprocess_for_train(ex, ds_args, tokenizer, rmt_args.segment_size),
         remove_columns=raw_val_ds.column_names,
+        num_proc=8,
     )
 
     model = RMTQwen3ForCausalLM.from_pretrained(
@@ -274,6 +330,7 @@ if __name__ == "__main__":
             bias="none",
         )
         model = get_peft_model(model, peft_config)
+        model.base_model.memory_cell.requires_grad_(False)
         model.print_trainable_parameters()
 
     training_args.remove_unused_columns = False
@@ -281,7 +338,7 @@ if __name__ == "__main__":
     training_args.greater_is_better = False
     training_args.load_best_model_at_end = True
     
-    data_collator = DataCollatorForLanguageModeling(tokenizer.pad_token_id, completion_only_loss=True, pad_to_multiple_of=rmt_args.segment_size)
+    data_collator = DataCollatorForLanguageModeling(tokenizer.pad_token_id, padding_free=True)
 
     logger.info("Running curriculum training across %d stages.", len(curriculum_stages))
     

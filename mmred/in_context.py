@@ -9,8 +9,17 @@ from .qgen.utils import fix_seed
 
 def _serialize_sequence(sequence_df) -> List[dict]:
     """Serialize a pandas DataFrame sequence into a JSON-friendly list of dicts."""
-    return sequence_df.to_dict("records")
+    from .const import ROOMS
 
+    serialized_steps: List[dict] = []
+    for step_idx, (_, frame) in enumerate(sequence_df.iterrows(), start=1):
+        rooms = {room: [] for room in ROOMS}
+        for character, location in frame.items():
+            rooms[location].append(character)
+
+        serialized_steps.append({"step_id": step_idx, "rooms": rooms})
+
+    return serialized_steps
 
 def generate_in_context_examples(
     base_path: str,

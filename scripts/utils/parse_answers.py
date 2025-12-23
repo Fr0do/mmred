@@ -226,7 +226,8 @@ def process_model_data(path, debug=False):
         # Calculate hit rate
         hit_rate = (
             df_answers.groupby(["seq_len", "qtype"])["hit"]
-            .mean()
+            .sum()
+            .div(50)
             .sort_index()
             .to_frame("hit")
         )

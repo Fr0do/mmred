@@ -20,11 +20,13 @@ class MemoryCell(torch.nn.Module):
             if hasattr(self, "memory"):
                 del self.memory
             self.register_parameter("memory", None)
-        memory_weights = torch.randn(
-            (num_mem_tokens, embeddings.embedding_dim), dtype=embeddings.weight.dtype
-        )
-        memory_weights *= embeddings.weight.data.std()
-        self.memory = Parameter(memory_weights, requires_grad=True)
+        # Create memory parameter
+        self.memory = Parameter(torch.empty(num_mem_tokens, self.embed_dim, dtype=embeddings.weight.dtype), requires_grad=True)
+        
+        # Initialization optimization: Small std dev or zeros to prevent initial shock
+        with torch.no_grad():
+            self.memory.data.normal_(mean=0.0, std=embeddings.weight.data.std().item())
+
     
     def forward(self, input):
         memory = self.memory.unsqueeze(0).expand(input.size(0), -1, -1)
@@ -57,7 +59,7 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
 
     def __init__(self, config: RMTQwen3Config):
         super().__init__(config)
-        self.memory = MemoryCell(self.get_input_embeddings(), config.num_mem_tokens)
+        self.memory_cell = MemoryCell(self.get_input_embeddings(), config.num_mem_tokens)
         self.num_mem_tokens = config.num_mem_tokens
 
     def _pad_attention_mask(self, attention_mask: torch.Tensor, target_shape: torch.Size) -> torch.Tensor:
@@ -86,11 +88,12 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
 
         if self.num_mem_tokens not in {0, None}:
             if memory_state is None:
-                memory_state = self.memory(inputs_embeds)
+                memory_state = self.memory_cell(inputs_embeds)
             if write_mem:
                 inputs_embeds = torch.cat([memory_state, inputs_embeds, memory_state], dim=1)
             else:
                 inputs_embeds = torch.cat([memory_state, inputs_embeds], dim=1)
+
         seg_kwargs["inputs_embeds"] = inputs_embeds
         seg_kwargs["input_ids"] = None
 
@@ -106,6 +109,9 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         if output_attentions is not None:
             seg_kwargs["output_attentions"] = output_attentions
         seg_kwargs["return_dict"] = True
+        # TODO: maybe shift according to current segment?
+        seg_kwargs["position_ids"] = None 
+
         return seg_kwargs
 
     def _process_segment_output(
@@ -122,9 +128,7 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
 
         logit_start = self.num_mem_tokens
         logit_end = -self.num_mem_tokens if write_mem else None
-        # print(model_outputs.logits[0])
         out["logits"] = model_outputs.logits[:, logit_start:logit_end]
-        # print(out["logits"][0])
         if output_hidden_states:
             out["hidden_states"] = [hs[:, logit_start:logit_end] for hs in model_outputs.hidden_states]
         if model_outputs.attentions is not None:
@@ -270,12 +274,11 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
                 {k: segment.get(k) for k in ("input_ids", "inputs_embeds", "attention_mask", "position_ids")},
                 memory_state=memory_state,
                 write_mem=True,
-                output_hidden_states=True,
+                output_hidden_states=output_hidden_states,
                 output_attentions=output_attentions,
             )
             cell_outputs.append(cell_out)
             memory_state = self._manage_gradients(memory_state, seg_num)
-
         out = self._process_outputs(
             cell_outputs,
             labels=labels,
@@ -316,7 +319,6 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
             write_mem=False,
             output_attentions=False,
         )
-        # print(seg_kwargs["inputs_embeds"].shape,seg_kwargs.get("attention_mask").shape)
         self._use_original_forward = True
         generation_output = super().generate(
             inputs_embeds=seg_kwargs["inputs_embeds"],
