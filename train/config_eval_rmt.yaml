@@ -1,0 +1,29 @@
+# train/config_eval_rmt.yaml
+
+# --- Model ---
+# For evaluation, model_name_or_path should point to the checkpoint with the adapter.
+model_name_or_path: "checkpoints/rmt_qwen_4b_lora_format"
+dtype: bfloat16
+attn_implementation: flash_attention_2
+use_peft: true # Important to load adapter
+
+# --- Dataset ---
+dataset_name: "dataset/hf_main_1mv_train_full"
+split: "val"
+subset: "default"
+system_prompt: "You are a helpful AI Assistant."
+task_prompt: |
+  Format your final answer with a {"answer": <value>}, where <value> is:
+    - A **single room name** (e.g., 'Kitchen') for location answers.
+    - A **number** (e.g., '3') for counting answers.
+    - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
+
+# --- RMT args ---
+segment_size: 256
+num_mem_tokens: 64
+max_n_segments: 10 # Should match the final stage of training
+
+# --- Eval Args ---
+output_dir: "data_cache" # To match openai_server_inference.py
+exp_name: "rmt_qwen_4b_lora_format_eval"
+max_new_tokens: 50

@@ -49,14 +49,10 @@ class DatasetArgs:
 
 
 def get_dataset(dataset_args: DatasetArgs, use_sft: bool) -> Dataset:
-    data = load_dataset(dataset_args.dataset_name, dataset_args.subset)[
-        dataset_args.split
-    ]
+    data = load_dataset(dataset_args.dataset_name, dataset_args.subset)[dataset_args.split]
     if dataset_args.subsample_train < 1.0:
         data = data.class_encode_column("qtype")
-        data = data.train_test_split(
-            train_size=dataset_args.subsample_train, seed=42, stratify_by_column="qtype"
-        )["train"]
+        data = data.train_test_split(train_size=dataset_args.subsample_train, seed=42, stratify_by_column="qtype")["train"]
     if use_sft:
         data = data.map(
             lambda x: {
@@ -115,11 +111,7 @@ def main(
     processing_class.pad_token = processing_class.eos_token
     if custom_args.add_reasoning_tokens:
         special_tokens = ["<think>", "</think>", "<answer>", "</answer>"]
-        tokens_to_add = [
-            token
-            for token in special_tokens
-            if token not in processing_class.get_vocab()
-        ]
+        tokens_to_add = [token for token in special_tokens if token not in processing_class.get_vocab()]
         if tokens_to_add:
             processing_class.add_tokens(tokens_to_add)
             print("Added special tokens:", tokens_to_add)
@@ -152,17 +144,11 @@ def main(
             dataset_args.split = "test"
             for i in [32, 64]:
                 dataset_args.subset = f"seq_len_{i}"
-                eval_dataset |= {
-                    f"test_{dataset_args.subset}": get_dataset(
-                        dataset_args, custom_args.use_sft
-                    )
-                }
+                eval_dataset |= {f"test_{dataset_args.subset}": get_dataset(dataset_args, custom_args.use_sft)}
         trainer = SFTTrainer(
             model=model,
             processing_class=processing_class,
-            data_collator=DataCollatorForCompletionOnlyLM(
-                response_template="<|im_start|>assistant", tokenizer=processing_class
-            ),
+            data_collator=DataCollatorForCompletionOnlyLM(response_template="<|im_start|>assistant", tokenizer=processing_class),
             train_dataset=train_dataset,
             eval_dataset=eval_dataset if training_args.do_eval else None,
             args=training_args,

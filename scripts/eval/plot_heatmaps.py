@@ -1,9 +1,11 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os
 import argparse
+import os
+
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 from scipy.stats import hmean
+
 
 qgen_map = {
     'first_app': 'FA-FA-R',
@@ -21,15 +23,15 @@ qgen_map = {
     'char_on_char_at_frame': 'FX-CCF-C',
     'n_char_at_frame': 'FX-NCF-I',
     'n_empty': 'FX-NE-I',
-    'room_empty': 'DC-RE-R',
-    'where_spend': 'DC-WS-R',
-    'crowded_room': 'DC-CR-R',
-    'who_spend': 'DC-WHS-C',
-    'spend_alone': 'DC-SA-C',
-    'spend_together': 'DC-ST-C',
-    'steps_in_room': 'DC-SR-I',
-    'rooms_visited': 'DC-RV-I',
-    'crowd_count': 'DC-CC-I'
+    'room_empty': 'LC-RE-R',
+    'where_spend': 'LC-WS-R',
+    'crowded_room': 'LC-CR-R',
+    'who_spend': 'LC-WHS-C',
+    'spend_alone': 'LC-SA-C',
+    'spend_together': 'LC-ST-C',
+    'steps_in_room': 'LC-SR-I',
+    'rooms_visited': 'LC-RV-I',
+    'crowd_count': 'LC-CC-I'
 }
 
 
@@ -46,16 +48,6 @@ def load_data(filepath):
     try:
         heatmap_data = pd.read_csv(filepath)
         heatmap_data.loc[:, 'qtype'] = heatmap_data.qtype.apply(lambda x: qgen_map.get(x))
-        
-        # Convert qtype to categorical with custom order
-        category_order = list(qgen_map.values())
-        heatmap_data['qtype'] = pd.Categorical(
-            heatmap_data['qtype'], 
-            categories=category_order, 
-            ordered=True
-        )
-        
-        # Set multi-index
         heatmap_data = heatmap_data.reset_index().set_index(
             ["seq_len", "qtype", "model"]
         )

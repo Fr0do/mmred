@@ -8,9 +8,11 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 import pandas as pd
 
+from mmred.const import ROOMS, NOBODY, CHARS
+
 # Constants
-room_names = ["Kitchen", "Bathroom", "Garden", "Office", "Bedroom", "Hallway"]
-people_names = ["Nobody", "Daniel", "Mary", "Michael", "Sandra", "John"]
+room_names = ROOMS
+people_names = [NOBODY, *CHARS]
 
 
 def serialize_sequence(sequence: List[Dict[str, str]]) -> List[Dict[str, Any]]:

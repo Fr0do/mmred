@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 
-from qgen.const import ROOMS, CHARS, COLORS, WIDTH, HEIGHT
+from ..const import ROOMS, CHARS, COLORS, WIDTH, HEIGHT
 
 
 def seq2video(seq, video_path):

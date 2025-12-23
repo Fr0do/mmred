@@ -3,25 +3,22 @@ import asyncio
 import base64
 import csv
 import json
+import hashlib
+import httpx
 import os
-from pathlib import Path
-
 import requests
 from io import BytesIO
+from pathlib import Path
+from PIL import Image
 from typing import List, Dict, Tuple, Union, Literal, Optional
 
 import pandas as pd
 from openai import AsyncOpenAI, OpenAI
 from openai.lib._pydantic import to_strict_json_schema
-from PIL import Image
-import base64
-import requests
 from pydantic import BaseModel
 from tqdm.asyncio import tqdm_asyncio
-import hashlib
-import httpx
 
-from qgen.const import (
+from mmred.const import (
     ROOMS,
     CHARS,
     NOBODY,
@@ -60,43 +57,16 @@ strict_schemas = {
     | {"name": "person"},
 }
 
-# THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
-# First think about the reasoning process and then provide the user with the answer.
-# Respond in the following format:
-# <think>
-# {detailed reasoning}
-# </think>
-# <answer>
-# {final_answer}
-# </answer>
-# Format your final answer with a single <value>, where <value> is:
-# - A **single room name** (e.g., 'Kitchen') for location answers.
-# - A **number** (e.g., '3') for counting answers.
-# - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions.
-# """
-
-# THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
-# First think about the reasoning process and then provide the user with the answer.
-# Respond in the following format:
-# <think>
-# {detailed reasoning}
-# </think>
-# { "answer": <value> }
-
-# Where <value> is:
-# - A **single room name** (e.g., "Kitchen") for location answers.
-# - A **number** (e.g., "3") for counting answers.
-# - A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions."""
-
-
 THINKING_PROMPT = """You are a helpful AI Assistant, designed to provided well-reasoned and detailed responses.
 First think about the reasoning process and then provide the user with the answer.\n
+If room contains a ["?"], it's masked and you should infer information from surrounding elements of sequence.
 Format your final answer with a {"answer": <value>}, where <value> is:
   - A **single room name** (e.g., 'Kitchen') for location answers.
   - A **number** (e.g., '3') for counting answers.
   - A **single person name** (e.g., 'Michael') for people answers or 'Nobody' if no person satisfies given conditions."""
 
 SYSTEM_PROMPT = """You are an assistant that analyzes sequences of human agents moving in an environment.
+If room contains a ["?"], it's masked and you should infer information from surrounding elements of sequence.
 Format your response as a following json:
 { "answer": <value> }
 
@@ -104,6 +74,42 @@ Where <value> is:
 - A **single room name** (e.g., "Kitchen") for location answers.
 - A **number** (e.g., "3") for counting answers.
 - A **single person name** (e.g., "Michael") for people answers or "Nobody" if no person satisfies given conditions."""
+
+IN_CONTEXT_HEADER = (
+    "Here are example sequences with their questions and answers for reference:"
+)
+
+
+def build_in_context_prompt(
+    row: pd.Series,
+    in_context_examples: Optional[List[Dict]],
+    max_examples: int,
+    max_len: int
+) -> str:
+    if not in_context_examples or max_examples <= 0:
+        return ""
+
+    qtype = row.get("qtype")
+    filtered_examples = [ex for ex in in_context_examples if ex.get("qtype") == qtype and ex.get("seq_len", 0) == max_len]
+    if not filtered_examples:
+        filtered_examples = in_context_examples
+    prompt_parts = [IN_CONTEXT_HEADER]
+    try:
+        for idx, example in enumerate(filtered_examples[:max_examples], 1):
+            sequence_render = "\n".join(str(frame) for frame in example["sequence_json"])
+            prompt_parts.append(
+                "\n".join(
+                    [
+                        f"Example {idx} (len={example.get('seq_len', 'N/A')}):",
+                        f"Question: {example.get('question', '')}",
+                        f"Sequence:\n{sequence_render}",
+                        f"Answer: {{'answer': '{example.get('answer', '')}'}}",
+                    ]
+                )
+            )
+    except Exception as e:
+        print(e)
+    return "\n\n".join(prompt_parts)
 
 
 def encode_image_base64(image: Union[str, Image.Image]) -> str:
@@ -148,9 +154,10 @@ def get_image_urls(row: pd.Series, data_path: Path) -> List[Dict]:
     ]
 
 
-def get_text_sequence(row: pd.Series, key: str) -> List[Dict]:
-    return "\n".join(str(frame) for frame in row[key]) + "\n" + row["question"]
-
+def get_text_sequence(row: pd.Series, key: str, prefix_question: bool = False) -> str:
+    sequence_text = "\n".join(str(frame) for frame in row[key])
+    question = row["question"]
+    return (question + "\n" + sequence_text) if prefix_question else (sequence_text + "\n" + question)
 
 async def process_row(
     row: pd.Series,
@@ -162,14 +169,23 @@ async def process_row(
     timeout: int = 600,
     max_retries: int = 2,
     thinking: bool = False,
+    prefix_question: bool = False,
     for_offline: bool = False,
+    in_context_examples: Optional[List[Dict]] = None,
+    max_in_context: int = 0,
 ) -> Tuple[Dict, str]:
     # Prepare the content based on input type
+    in_context_prompt = build_in_context_prompt(
+        row, in_context_examples, max_in_context, min(row['seq_len'], 16)
+    )
     if use_text_input:
         key = "sequence_json" if "sequence_json" in row else "sequence_description"
-        user_content = [{"type": "text", "text": get_text_sequence(row, key)}]
+        user_text = get_text_sequence(row, key, prefix_question=prefix_question)
+        if in_context_prompt:
+            user_text = f"{in_context_prompt}\n\n{user_text}"
         if thinking:
-            user_content[0]["text"] =  THINKING_PROMPT + '\n' + user_content[0]["text"]
+            user_text = THINKING_PROMPT + '\n' + user_text
+        user_content = [{"type": "text", "text": user_text}]
         row_dict = row.drop(key).to_dict()
     else:
         try:
@@ -177,7 +193,13 @@ async def process_row(
             if not image_urls:
                 return row.to_dict(), "Error: No images found for the given sequence"
             sequence = [url | {"type": "image_url"} for url in image_urls]
-            user_content = sequence + [{"type": "text", "text": THINKING_PROMPT + '\n' + row["question"] if thinking else row["question"]}]
+            question_text = THINKING_PROMPT + '\n' + row["question"] if thinking else row["question"]
+            if in_context_prompt:
+                question_text = f"{in_context_prompt}\n\n{question_text}"
+            if prefix_question:
+                user_content = [{"type": "text", "text": question_text}] + sequence
+            else:
+                user_content = sequence + [{"type": "text", "text": question_text}]
             row_dict = row.to_dict()
         except Exception as e:
             return row.to_dict(), f"Error preparing images: {str(e)}"
@@ -193,9 +215,10 @@ async def process_row(
     extra_body = {
         # "repetition_penalty": 1.1,
         # "frequency_penalty": 0.05,
-        # "presence_penalty": 0.05,
+        # "presence_penalty": 1.5,
         # "min_p": 0.05,
-        # "top_k": 60,
+        "top_k": 20,
+        "chat_template_kwargs": {"enable_thinking": thinking},
     }
     if not for_offline:
         # Prepare extra body parameters
@@ -204,30 +227,9 @@ async def process_row(
                 extra_body.update(
                     {
                         "guided_json": schemas[row["atype"]],
-                        "guided_decoding_backend": "outlines",
+                        # "guided_decoding_backend": "outlines",
                     }
                 )
-                if "Aria" in model_name:
-                    extra_body.update(
-                        {
-                            "stop_token_ids": [
-                                93532,
-                                93653,
-                                944,
-                                93421,
-                                1019,
-                                93653,
-                                93519,
-                            ]
-                        }
-                    )
-                if thinking:
-                    extra_body.update(
-                        {
-                            "include_stop_str_in_output": True,
-                            "stop": ["</answer>"],
-                        }
-                    )
             else:
                 extra_kwargs = extra_body.copy()
                 extra_kwargs.update(
@@ -239,7 +241,6 @@ async def process_row(
                     }
                 )
                 extra_body = None
-
         # Use semaphore for rate limiting
         async with semaphore:
             retry_count = 0
@@ -250,13 +251,18 @@ async def process_row(
                             model=model_name,
                             messages=messages,
                             temperature=0.6 if thinking else 0.0,
-                            max_completion_tokens=2048 if thinking else 50,
+                            max_completion_tokens=20000 if thinking else 50,
                             extra_body=extra_body,
                             **extra_kwargs,
                         ),
                         timeout=timeout,
-                    )
-                    answer = response.choices[0].message.content
+                    ) 
+                    reasoning = getattr(response.choices[0].message, "reasoning_content", "") or ""
+                    answer = getattr(response.choices[0].message, "content", "") or ""
+                    if not thinking:
+                        answer = reasoning + answer
+                    else:
+                        answer = "<think>" + reasoning + "</think>" + answer
                     return row_dict, answer
 
                 except asyncio.TimeoutError:
@@ -291,8 +297,8 @@ async def process_row(
             "body": {
                 "model": model_name,
                 "messages": messages,
-                "temperature": 0.7 if thinking else 0.0,
-                "max_completion_tokens": 768 if thinking else 50,
+                "temperature": 0.6 if thinking else 0.0,
+                "max_completion_tokens": 16384 if thinking else 50,
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": strict_schemas[row["atype"]],
@@ -312,10 +318,18 @@ async def test_connection(
     dummy_messages = [
         {
             "role": "system",
-            "content": "Your only purpose is to answer 'hello world' to any message.",
+            "content": "Your only purpose is to answer 'I'm a teapot' to any message.",
         },
         {"role": "user", "content": "Who are you?"},
     ]
+    extra_body = {
+        # "repetition_penalty": 1.1,
+        # "frequency_penalty": 0.05,
+        # "presence_penalty": 1.5,
+        "min_p": 0.0,
+        "top_k": 20,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
 
     retry_count = 0
     while retry_count < max_retries:
@@ -327,10 +341,14 @@ async def test_connection(
                 model=model_name,
                 messages=dummy_messages,
                 max_completion_tokens=25,
-                timeout=30,  # Add a timeout to prevent hanging
+                timeout=30,
+                extra_body=extra_body,
             )
+            reasoning = getattr(response.choices[0].message, "reasoning_content", "") or ""
+            answer = getattr(response.choices[0].message, "content", "") or ""
+            answer = "<think>" + reasoning + "</think>" + answer
             print(
-                f"Connection successful. Response: {response.choices[0].message.content}"
+                f"Connection successful. Response: {answer}"
             )
             return True
         except Exception as e:
@@ -357,6 +375,9 @@ async def process_dataset(
     timeout: int = 600,
     max_retries: int = 2,
     thinking: bool = False,
+    prefix_question: bool = False,
+    in_context_examples: Optional[List[Dict]] = None,
+    max_in_context: int = 0,
 ):
 
     semaphore = asyncio.Semaphore(semaphore_limit)
@@ -372,7 +393,7 @@ async def process_dataset(
     # Generate a unique position for the progress bar based on client base URL using SHA-256
     # This ensures parallel scripts don't have overlapping progress bars
     base_url_str = str(client.base_url)
-    hash_url_str = base_url_str + str(data_path)
+    hash_url_str = base_url_str + str(data_path) + str(thinking)
     sha256_hash = hashlib.sha256(hash_url_str.encode()).hexdigest()
     position = int(sha256_hash, 16) % 16
 
@@ -396,6 +417,10 @@ async def process_dataset(
                     timeout,
                     max_retries,
                     thinking,
+                    prefix_question,
+                    False,
+                    in_context_examples,
+                    max_in_context,
                 )
             )
             tasks.append(task)
@@ -417,6 +442,14 @@ async def process_dataset(
                 leave=False,
             ):
                 qa_data, predicted_answer = await coro
+                # try:
+                #     out = await coro
+                #     qa_data, predicted_answer = out
+                # except Exception as e:
+                #     # log whatever identifies this task
+                #     print(e)
+                #     # optionally continue with next task
+                #     continue
                 writer.writerow(qa_data | {"Predicted_Answer": predicted_answer})
 
             # Optional: add a small delay between batches to prevent API rate limits
@@ -432,6 +465,9 @@ async def create_task_batch(
     semaphore_limit: int = 10,
     use_text_input: bool = False,
     thinking: bool = False,
+    prefix_question: bool = False,
+    in_context_examples: Optional[List[Dict]] = None,
+    max_in_context: int = 0,
 ):
     tasks = []
     semaphore = asyncio.Semaphore(semaphore_limit)
@@ -448,7 +484,10 @@ async def create_task_batch(
                 timeout,
                 max_retries,
                 thinking,
+                prefix_question,
                 for_offline,
+                in_context_examples,
+                max_in_context,
             )
         )
         tasks.append(task)
@@ -466,15 +505,6 @@ async def create_task_batch(
     with open(task_file_name, "a+") as file:
         for task_json in task_jsons:
             file.write(json.dumps(task_json) + "\n")
-
-    # # Upload file
-    # batch_file = client.files.create(file=open(task_file_name, "rb"), purpose="batch")
-
-    # # Create batch job
-    # batch_job = client.batches.create(
-    #     input_file_id=batch_file.id, endpoint="/v1/chat/completions", completion_window="24h"
-    # )
-
 
 def _load_dataset(data_path: Path, use_text_input: bool) -> pd.DataFrame:
     dataset = []
@@ -540,7 +570,7 @@ async def main_async(args):
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
         args.output_csv = os.path.join(
-            "data_cache", args.exp_name, f"qa_pairs_answers_{model_format}_text_{use_text_input}.csv"
+            "data_cache", args.exp_name, f"qa_pairs_answers_{model_format}_text_{use_text_input}_thinking_{args.thinking}_prefix_q_{args.prefix_question}.csv"
         )
 
     # Create directory if it doesn't exist
@@ -556,6 +586,20 @@ async def main_async(args):
     data_path = (
         args.text_json_path if use_text_input else Path(args.data_path) / args.exp_name
     )
+
+    in_context_examples = None
+    if args.in_context:
+        default_ctx_path = Path(args.data_path) / args.exp_name / "in_context_examples.json"
+        context_path = Path(args.in_context_path) if args.in_context_path else default_ctx_path
+        if context_path.exists():
+            print(f"Loading in-context examples from {context_path}")
+            with open(context_path, "r") as f:
+                in_context_examples = json.load(f)
+            print(f"Loaded {len(in_context_examples)} in-context examples")
+        else:
+            print(
+                f"In-context path {context_path} not found. Continuing without in-context examples."
+            )
 
     full_dataset = _load_dataset(data_path, use_text_input)
     print(f"Total QA pairs to process: {len(full_dataset)}")
@@ -584,6 +628,9 @@ async def main_async(args):
                 args.semaphore_limit,
                 use_text_input,
                 args.thinking,
+                args.prefix_question,
+                in_context_examples,
+                args.in_context_examples,
             )
         else:
             print(f"Writing output to {args.output_csv}")
@@ -599,6 +646,9 @@ async def main_async(args):
                 args.timeout,
                 args.max_retries,
                 args.thinking,
+                args.prefix_question,
+                in_context_examples,
+                args.in_context_examples,
             )
             print(
                 f"Processing complete. Answers have been written to {args.output_csv}"
@@ -661,12 +711,32 @@ def main():
         "--thinking", action="store_true", default=False, help="If model is a thinker"
     )
     parser.add_argument(
+        "--prefix_question", action="store_true", default=False, help="If question is a prefix of sequence"
+    )
+    parser.add_argument(
         "--offline",
         action="store_true",
         default=False,
         help="If inference is an offline batch",
     )
     parser.add_argument("--model_name", type=str, default=None, help="Model Name")
+    parser.add_argument(
+        "--in_context",
+        action="store_true",
+        help="Append in-context examples to each prompt",
+    )
+    parser.add_argument(
+        "--in_context_path",
+        type=str,
+        default=None,
+        help="Path to in-context examples json. Defaults to <data_path>/<exp_name>/in_context_examples.json",
+    )
+    parser.add_argument(
+        "--in_context_examples",
+        type=int,
+        default=5,
+        help="Number of in-context examples to include per request",
+    )
     args = parser.parse_args()
 
     # Run the async main function
