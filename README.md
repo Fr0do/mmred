@@ -14,8 +14,9 @@ pip install -e .
 
 ## 📘 Project Structure
 
-- `mmred/` — utility package for working with the benchmark
+- `mmred/` — utility package for working with the benchmark ([detailed documentation](./mmred/README.md))
 - `scripts/generate_dataset.py` — generate the benchmark dataset
+- `scripts/render_images.py` — render images from generated dataset
 - `vllm_servers.sh` — launch a vLLM model server
 - `inference.sh` — run inference on the selected model
 - `scripts/utils/parse_answers.py` — parse raw model outputs and save results in CSV format
@@ -25,10 +26,26 @@ pip install -e .
 ### 1. (Re)Generate the Dataset
 
 ```bash
-python scripts/generate_dataset.py --base_path BASE_PATH --exp_name EXP_NAME
+# Generate with default settings
+python scripts/generate_dataset.py --output_path data/dataset.json
+
+# Generate with custom settings
+python scripts/generate_dataset.py \
+    --output_path data/dataset.json \
+    --seq_lengths 16 32 64 128 \
+    --n_questions 100 \
+    --seed 42
 ```
 
-### 2. Launch vLLM Server
+### 2. (Optional) Render Images
+
+```bash
+python scripts/render_images.py \
+    --input_path data/dataset.json \
+    --output_dir data/images/
+```
+
+### 3. Launch vLLM Server
 
 Edit vllm_servers.sh to specify your model(s), then run:
 
