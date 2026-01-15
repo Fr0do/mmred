@@ -1,36 +1,33 @@
-import concurrent.futures
-import json
-import time
-from functools import partial
+"""Video generation from JSON dataset."""
+
 from pathlib import Path
+from typing import Any
 
-import pandas as pd
-
-from .visualization import seq2video
-from ..const import SEQ_LENGTHS
+from .visualization import render_sequence_from_json
 
 
-def _dataset_entry_to_video(entry, dataset_path):
-    seq = pd.read_csv(dataset_path / entry["sequence"])
-    video_path = dataset_path / entry["video"]
-    seq2video(seq, video_path)
-
-
-def generate_videos(base_path, exp_name):
-    exp_path = Path(base_path) / exp_name
-
-    for seq_len in SEQ_LENGTHS:
-        dataset_path = exp_path / f"len_{seq_len}"
-
-        with open(str(dataset_path / "questions.json"), "r") as file:
-            q_dataset = json.load(file)
-
-        st = time.time()
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            executor.map(
-                partial(_dataset_entry_to_video, dataset_path=dataset_path), q_dataset
-            )
-        et = time.time()
-        print(
-            f"Finished videos generation for len_{seq_len}. Elapsed time: {et - st:.1f} s"
-        )
+def render_dataset(
+    dataset: list[dict[str, Any]],
+    output_dir: str | Path,
+    as_gif: bool = False,
+) -> None:
+    """Render images for all samples in a dataset.
+    
+    Args:
+        dataset: List of sample dictionaries with 'qid' and 'sequence' keys
+        output_dir: Base output directory
+        as_gif: If True, create GIFs; otherwise create PNG frame directories
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    for sample in dataset:
+        qid = sample["qid"]
+        sequence = sample["sequence"]
+        
+        if as_gif:
+            output_path = output_dir / f"{qid}.gif"
+        else:
+            output_path = output_dir / qid
+        
+        render_sequence_from_json(sequence, output_path, as_gif=as_gif)

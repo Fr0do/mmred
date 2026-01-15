@@ -1,78 +1,103 @@
+"""Generate in-context examples for few-shot prompting.
+
+This module provides functionality to generate compact in-context examples
+that can be used for few-shot prompts.
+"""
+
 import json
 from pathlib import Path
-from typing import List, Sequence
+from typing import Sequence
 
-from .const import SEED
-from .qgen.qgen import _generate_question, QUESTIONS
-from .qgen.utils import fix_seed
+from .config import GenerationConfig, DEFAULT_SEED
+from .data_model import serialize_sequence, MetadataStep
+from .qgen.qgen import _generate_single_question
+from .qgen.questions import QUESTIONS
+from .qgen.utils import create_rng
 
-
-def _serialize_sequence(sequence_df) -> List[dict]:
-    """Serialize a pandas DataFrame sequence into a JSON-friendly list of dicts."""
-    from .const import ROOMS
-
-    serialized_steps: List[dict] = []
-    for step_idx, (_, frame) in enumerate(sequence_df.iterrows(), start=1):
-        rooms = {room: [] for room in ROOMS}
-        for character, location in frame.items():
-            rooms[location].append(character)
-
-        serialized_steps.append({"step_id": step_idx, "rooms": rooms})
-
-    return serialized_steps
 
 def generate_in_context_examples(
-    base_path: str,
-    exp_name: str,
+    output_path: str | Path,
     n_examples_per_task: int = 5,
     seq_lengths: Sequence[int] = (1, 2, 4, 8, 16),
+    question_types: list[str] | None = None,
+    seed: int = DEFAULT_SEED,
     overwrite: bool = True,
 ) -> Path:
     """Generate a compact in-context dataset for few-shot prompts.
 
-    The resulting file is stored as ``in_context_examples.json`` under the
-    experiment directory and contains serialized sequences, questions, and
+    The resulting file contains serialized sequences, questions, and
     answers across the provided ``seq_lengths``.
+    
+    Args:
+        output_path: Path to output JSON file
+        n_examples_per_task: Number of examples per question type per seq_len
+        seq_lengths: Sequence lengths to include
+        question_types: Question types to include (None = all)
+        seed: Random seed for reproducibility
+        overwrite: Whether to overwrite existing file
+        
+    Returns:
+        Path to the generated file
     """
-
-    fix_seed(SEED)
-    exp_path = Path(base_path) / exp_name
-    exp_path.mkdir(parents=True, exist_ok=True)
-
-    output_path = exp_path / "in_context_examples.json"
+    from .config import DEFAULT_ROOMS, DEFAULT_CHARS
+    
+    output_path = Path(output_path)
     if output_path.exists() and not overwrite:
         return output_path
-
-    examples: List[dict] = []
-
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    question_types = question_types or list(QUESTIONS.keys())
+    examples = []
+    
     for seq_len in seq_lengths:
-        for question_type, question_fn in QUESTIONS.items():
-            q_kwargs = dict()
+        for question_type in question_types:
+            if question_type not in QUESTIONS:
+                continue
+                
+            question_fn = QUESTIONS[question_type]
+            
+            # Special cases
+            q_kwargs = {}
             if (question_type == "where_spend") and (seq_len <= 4):
                 q_kwargs["is_more"] = True
             elif (question_type == "spend_alone") and (seq_len <= 2):
                 q_kwargs["is_more"] = True
-
-            seen_hashes: List[str] = []
+            
+            # Create deterministic RNG for this combination
+            batch_seed = seed + hash(f"incontext_{seq_len}_{question_type}") % (2**31)
+            rng = create_rng(batch_seed)
+            
+            seen_hashes = []
             for ex_idx in range(n_examples_per_task):
-                sequence_df, question, answer, atype, seq_hash = _generate_question(
-                    question_fn, seq_len, seen_hashes, **q_kwargs
+                seq_df, question, answer, atype, relevant_map, seq_hash = _generate_single_question(
+                    question_fn, seq_len, seen_hashes, 
+                    DEFAULT_CHARS, DEFAULT_ROOMS, rng, **q_kwargs
                 )
-                seen_hashes = [*seen_hashes, seq_hash]
-                examples.append(
-                    {
-                        "example_id": f"ctx_{seq_len}_{question_type}_{ex_idx}",
-                        "seq_len": seq_len,
-                        "qtype": question_type,
-                        "atype": atype,
-                        "question": question,
-                        "answer": answer,
-                        "sequence_json": _serialize_sequence(sequence_df),
-                    }
-                )
+                seen_hashes.append(seq_hash)
+                
+                # Serialize sequence
+                sequence = serialize_sequence(seq_df, DEFAULT_ROOMS)
+                
+                # Create metadata
+                metadata = []
+                for step_id in range(1, seq_len + 1):
+                    step_rooms = relevant_map.get(step_id, [])
+                    room_relevance = {room: room in step_rooms for room in DEFAULT_ROOMS}
+                    metadata.append(MetadataStep(step_id=step_id, rooms=room_relevance))
+                
+                examples.append({
+                    "example_id": f"ctx_{seq_len}_{question_type}_{ex_idx}",
+                    "seq_len": seq_len,
+                    "qtype": question_type,
+                    "atype": atype,
+                    "question": question,
+                    "answer": answer,
+                    "sequence": [s.to_dict() for s in sequence],
+                    "metadata": [m.to_dict() for m in metadata],
+                })
 
     with open(output_path, "w") as f:
         json.dump(examples, f, indent=2)
 
     return output_path
-
