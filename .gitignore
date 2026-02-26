@@ -170,6 +170,7 @@ cython_debug/
 .DS_Store
 
 data*
+!**/data_model.py
 results
 *cache
 wandb
