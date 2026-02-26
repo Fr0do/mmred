@@ -15,6 +15,10 @@ from transformers.trainer_callback import EarlyStoppingCallback, TrainerCallback
 from trl import ModelConfig, SFTConfig, SFTTrainer, TrlParser
 from trl.trainer.sft_trainer import DataCollatorForLanguageModeling
 
+# torch.autograd.set_detect_anomaly(True)
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('high')
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -52,154 +56,6 @@ class CurriculumArgs:
         default=0.0,
         metadata={"help": "Minimum improvement in eval loss to reset patience."},
     )
-
-
-def preprocess_function(example, ds_args: "DatasetArgs", tokenizer, segment_size: int) -> Dict[str, Any]:
-    """
-    Segments:
-        [S0 (padded to segment_size), S1 (padded), ..., Sk (padded), S_final (assistant_prefix + completion, padded)]
-
-    S0..Sk together contain:
-        system + user (chat template, pre-assistant area) + steps (whole list broken into pieces)
-
-    S_final contains:
-        assistant_prefix (chat template) + completion (json answer + eos)
-    """
-    # 1) Build user message text (task prompt + question)
-    user_content_parts: List[str] = []
-    if getattr(ds_args, "task_prompt", None):
-        user_content_parts.append(ds_args.task_prompt)
-    user_content_parts.append(example["question"])
-    user_content = "\n".join(user_content_parts)
-
-    # 2) Messages up to assistant (no assistant content yet)
-    messages = []
-    if getattr(ds_args, "system_prompt", None):
-        messages.append({"role": "system", "content": ds_args.system_prompt})
-    messages.append({"role": "user", "content": user_content})
-
-    # 3) We need to split the chat-template tokens into:
-    #    - pre_assistant_tokens: everything BEFORE the assistant header/prefix
-    #    - assistant_prefix_tokens: the assistant header/prefix itself (no assistant content)
-    #
-    #    Robust approach:
-    #      A) Template with add_generation_prompt=False  → ends right after the user content (no assistant header)
-    #      B) Template with add_generation_prompt=True + dummy assistant content → assistant header + dummy content
-    #      C) Find where dummy content begins; tokens before it contain both pre_assistant + assistant_prefix.
-    #         Then subtract (A) from the front to isolate the assistant prefix.
-    #
-    #   NOTE: This avoids relying on EOS positioning or tokenizer-specific special IDs.
-    baseline = tokenizer.apply_chat_template(
-        messages, add_generation_prompt=False, tokenize=True, return_dict=True
-    )
-    with_gen_and_dummy = tokenizer.apply_chat_template(
-        messages + [{"role": "assistant", "content": "DUMMY"}],
-        add_generation_prompt=False, tokenize=True, return_dict=True, enable_thinking=False,
-    )
-
-    base_ids = list(baseline.input_ids)  # up to end of user
-    gen_dummy_ids = list(with_gen_and_dummy.input_ids)  # includes assistant prefix + tokens for "DUMMY"
-
-    # Tokenize the dummy string alone to locate its start reliably.
-    dummy_only = tokenizer("DUMMY", add_special_tokens=False).input_ids
-
-    # Find the dummy content start inside gen_dummy_ids
-    # We search for the first exact match of the dummy_only sequence.
-    def find_subseq(haystack: List[int], needle: List[int]) -> int:
-        if not needle:
-            return -1
-        L, N = len(haystack), len(needle)
-        for i in range(max(0, len(base_ids)), L - N + 1):  # start search at least after baseline
-            if haystack[i:i+N] == needle:
-                return i
-        return -1
-
-    dummy_start = find_subseq(gen_dummy_ids, dummy_only)
-    if dummy_start == -1:
-        # Fallback: if we can't find it, we treat the entire difference as assistant prefix.
-        # This is rare, but keeps behavior defined.
-        pre_assistant_tokens = base_ids
-        assistant_prefix_tokens = gen_dummy_ids[len(base_ids):]
-    else:
-        # Tokens before dummy_start contain: base_ids + assistant_prefix_tokens
-        assert len(gen_dummy_ids) >= dummy_start
-        pre_plus_prefix = gen_dummy_ids[:dummy_start]
-        # Split into (pre-assistant, assistant_prefix) using base_ids length.
-        assert len(pre_plus_prefix) >= len(base_ids)
-        pre_assistant_tokens = pre_plus_prefix[:len(base_ids)]
-        assistant_prefix_tokens = pre_plus_prefix[len(base_ids):]
-
-    # Sanity: pre_assistant_tokens should equal base_ids (they should!),
-    # but keep the variable for clarity.
-    # Now, we will construct:
-    #   prompt_tokens_before_assistant = pre_assistant_tokens + steps_tokens
-    #   completion_segment = assistant_prefix_tokens + completion_tokens (+ eos)
-    prompt_tokens_before_assistant = list(pre_assistant_tokens)
-
-    # 4) Steps
-    steps = example["sequence_json"].replace("'", '"')
-    if isinstance(steps, str):
-        steps = json.loads(steps)
-    # Ensure steps are strings with a trailing newline (as the original code)
-    step_texts = [str(s) + "\n" for s in steps]
-
-    # Tokenize steps one-by-one, then append into the prompt area (before assistant)
-    tokenized_steps = tokenizer(step_texts, add_special_tokens=False)
-    for step_ids in tokenized_steps.input_ids:
-        prompt_tokens_before_assistant.extend(step_ids)
-
-    # 5) Pack pre-assistant prompt content into fixed-size segments, padding each to segment_size
-    input_ids: List[int] = []
-    num_segments = 0
-
-    def flush_segment(seg: List[int], pad_to: int, pad_id: int):
-        nonlocal input_ids, num_segments
-        if not seg:
-            return
-        if len(seg) < pad_to:
-            seg = seg + [pad_id] * (pad_to - len(seg))
-        input_ids.extend(seg)
-        num_segments += 1
-
-    # Greedy packer for the prompt content (pre-assistant + steps)
-    current_seg: List[int] = []
-    for tid in prompt_tokens_before_assistant:
-        if len(current_seg) == segment_size:
-            flush_segment(current_seg, segment_size, tokenizer.pad_token_id)
-            current_seg = []
-        current_seg.append(tid)
-    # If there's remaining content in the current segment, pad and flush
-    if current_seg:
-        flush_segment(current_seg, segment_size, tokenizer.pad_token_id)
-
-    # 6) Build the completion segment (NOT padded):
-    #    assistant_prefix + JSON completion + eos
-    completion_text = json.dumps({"answer": example["answer"]})
-    completion_ids = tokenizer(completion_text, add_special_tokens=False).input_ids
-    eos_id = tokenizer.eos_token_id
-    if eos_id is None:
-        raise ValueError("tokenizer.eos_token_id is None; please set eos token.")
-    completion_segment = list(assistant_prefix_tokens) + completion_ids + [eos_id]
-    num_completion_paddings = len(completion_segment) - segment_size
-    # num_completion_paddings = 0
-    completion_segment = [tokenizer.pad_token_id] * num_completion_paddings + completion_segment
-
-    # Append completion segment WITHOUT padding and count exactly one segment
-    input_ids.extend(completion_segment)
-    num_segments += 1  # final segment
-
-    # 7) Build completion mask:
-    #    - mask 0 over all padded prompt segments + assistant_prefix
-    #    - mask 1 over the completion part of answer segment
-    total_prompt_len = len(input_ids) - len(completion_segment) + num_completion_paddings + len(assistant_prefix_tokens)
-    completion_mask = [0] * total_prompt_len + [1] * (len(input_ids) - total_prompt_len)
-
-    return {
-        "input_ids": input_ids,
-        "completion_mask": completion_mask,
-        "num_segments": num_segments,
-        "length": len(input_ids),
-    }
 
 
 def preprocess_for_train(example, ds_args: "DatasetArgs", tokenizer, segment_size: int) -> Dict[str, Any]:
@@ -272,6 +128,7 @@ if __name__ == "__main__":
 
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, local_files_only=True)
     if tokenizer.pad_token_id is None:
+        print("patching [PAD] token with ", tokenizer.eos_token)
         tokenizer.pad_token_id = tokenizer.eos_token_id
 
     curriculum_stages = curriculum_args.curriculum_stages or [
@@ -281,9 +138,10 @@ if __name__ == "__main__":
         (stage.get("max_n_segments") for stage in curriculum_stages if stage.get("max_n_segments") is not None),
         default=None,
     )
-
+    
     config = RMTQwen3Config.from_pretrained(
         model_args.model_name_or_path,
+        attn_implementation="flash_attention_2",
         segment_size=rmt_args.segment_size,
         max_n_segments=curriculum_max_segments or rmt_args.max_n_segments,
         num_mem_tokens=rmt_args.num_mem_tokens,
@@ -338,7 +196,7 @@ if __name__ == "__main__":
     training_args.greater_is_better = False
     training_args.load_best_model_at_end = True
     
-    data_collator = DataCollatorForLanguageModeling(tokenizer.pad_token_id, padding_free=True)
+    data_collator = DataCollatorForLanguageModeling(tokenizer.pad_token_id, padding_free=False, pad_to_multiple_of=rmt_args.max_n_segments * rmt_args.segment_size)
 
     logger.info("Running curriculum training across %d stages.", len(curriculum_stages))
     
@@ -391,4 +249,4 @@ if __name__ == "__main__":
             trainer.args.warmup_steps = 0
             trainer.args.warmup_ratio = 0.0
         trainer.train()
-        trainer.save_model()
+

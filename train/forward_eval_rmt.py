@@ -7,12 +7,16 @@ from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from trl.trainer.sft_trainer import DataCollatorForLanguageModeling
-from transformers import AutoModelForCausalLM, AutoTokenizer, DataCollatorWithPadding
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset, Dataset
 from accelerate import Accelerator
+from trl.trainer.utils import pad
 
 from modeling_rmt import RMTQwen3Config, RMTQwen3ForCausalLM
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+torch.set_float32_matmul_precision('high')
 
 # --- 1. Data Classes & Arguments ---
 
@@ -46,7 +50,7 @@ def load_arguments() -> Tuple[InferenceArgs, DatasetArgs, ModelArgs]:
     defaults = DatasetArgs()
 
     parser = argparse.ArgumentParser(description="Run greedy exact-match benchmark with online CSV writing.")
-    parser.add_argument("--output_csv", default="data/main_1mv/rmt_forward.csv", help="Path to save CSV.")
+    parser.add_argument("--output_csv", default="data/main_1mv/rmt_forward_fixed.csv", help="Path to save CSV.")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--model_name_or_path", required=True, help="Model checkpoint.")
@@ -138,32 +142,21 @@ def preprocess_for_train(example, ds_args: "DatasetArgs", tokenizer, segment_siz
 
 from torch.nn.utils.rnn import pad_sequence
 
-def collate_fn(batch, pad_value=0, label_pad_value=-100):
+def collate_fn(batch, pad_value=0, label_pad_value=-100, pad_to_multiple_of=None):
     """
     Args:
         batch: List of dictionaries provided by the dataset.
         pad_value: Padding value for input_ids (usually tokenizer.pad_token_id).
         label_pad_value: Padding value for labels (usually -100 for CrossEntropyLoss).
     """
-    
-    # 1. Extract and convert to tensors (if they aren't already)
-    # We use clone().detach() if they are tensors, or torch.tensor() if they are lists
     input_ids = [torch.tensor(b['input_ids']) for b in batch]
     attention_mask = [torch.tensor(b['attention_mask']) for b in batch]
     labels = [torch.tensor(b['labels']) for b in batch]
     row_idx = [b['row_idx'] for b in batch]
 
-    # 2. Pad sequences
-    # batch_first=True results in shape (Batch_Size, Max_Length)
-    input_ids_padded = pad_sequence(input_ids, batch_first=True, padding_value=pad_value)
-    
-    # Attention masks are usually padded with 0 (indicating ignored positions)
-    attention_mask_padded = pad_sequence(attention_mask, batch_first=True, padding_value=0)
-    
-    # Labels are often padded with -100 so PyTorch's CrossEntropyLoss ignores them
-    labels_padded = pad_sequence(labels, batch_first=True, padding_value=label_pad_value)
-
-    # 3. Stack simple fields
+    input_ids_padded = pad(input_ids, padding_value=pad_value, pad_to_multiple_of=pad_to_multiple_of, padding_side="right")
+    attention_mask_padded = pad(attention_mask, padding_value=0, pad_to_multiple_of=pad_to_multiple_of, padding_side="right")
+    labels_padded = pad(labels, padding_value=label_pad_value, pad_to_multiple_of=pad_to_multiple_of, padding_side="right")
     row_idx_tensor = torch.tensor(row_idx)
 
     return {
@@ -188,7 +181,7 @@ def main():
         print(f"Loading model: {model_args.model_name_or_path}...")
     
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "right"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
@@ -219,7 +212,7 @@ def main():
     # --- Load & Prep Dataset ---
     if accelerator.is_main_process:
         print(f"Loading dataset: {ds_args.dataset_name} ({ds_args.split})...")
-        
+    
     raw_dataset = load_dataset(ds_args.dataset_name, ds_args.subset)[ds_args.split]
     
     if inf_args.max_samples is not None:
@@ -239,7 +232,7 @@ def main():
     dataloader = DataLoader(
         processed_dataset, 
         batch_size=inf_args.batch_size,
-        collate_fn=lambda x: collate_fn(x, pad_value=tokenizer.pad_token_id),
+        collate_fn=lambda x: collate_fn(x, pad_value=tokenizer.pad_token_id, pad_to_multiple_of=config.segment_size),
         pin_memory=True,
         num_workers=8,
         prefetch_factor=4,
@@ -258,7 +251,7 @@ def main():
 
     for batch in dataloader:
         with torch.inference_mode():
-            outputs = model(**batch)
+            outputs = model(use_cache=False, **batch)
         logits = outputs.logits
         
         # Shift Logic

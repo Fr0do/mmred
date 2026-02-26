@@ -35,36 +35,36 @@ lora_dropout: 0.05
 # RMT args
 segment_size: 256
 num_mem_tokens: 32
-max_n_segments: 16
+max_n_segments: 4
 k2: -1
 
 # Curriculum args
 curriculum_stages:
-  # - max_n_segments: 2
-  #   num_train_epochs: 1
+  - max_n_segments: 4
+    num_train_epochs: 5
   # - max_n_segments: 3
   #   num_train_epochs: 1
   # - max_n_segments: 4
   #   num_train_epochs: 1
-  - max_n_segments: 6
-    num_train_epochs: 5
-early_stopping_patience: 2
+  # - max_n_segments: 6
+  #   num_train_epochs: 5
+early_stopping_patience: 5
 early_stopping_threshold: 0.005
 
 # Training Args
-use_liger_kernel: true
-output_dir: "checkpoints/rmt_qwen_4b_lora_frozen_mem"
-run_name: "rmt_qwen_4b_lora_frozen_mem"
+use_liger_kernel: false
+output_dir: "checkpoints/rmt_qwen_4b_lora_frozen_mem_fix_attn_mask"
+run_name: "rmt_qwen_4b_lora_frozen_mem_fix_attn_mask"
 overwrite_output_dir: true
-per_device_train_batch_size: 32
-max_grad_norm: 1.0
-gradient_accumulation_steps: 1
+per_device_train_batch_size: 16
+max_grad_norm: 10.0
+gradient_accumulation_steps: 2
 gradient_checkpointing: true
 gradient_checkpointing_kwargs:
   use_reentrant: False
 dataloader_num_workers: 16
-learning_rate: 5.e-5
-weight_decay: 0.01
+learning_rate: 5.e-4
+weight_decay: 0.05
 warmup_ratio: 0.05
 lr_scheduler_type: "constant_with_warmup"
 optim: "schedule_free_adamw" # "adamw_torch"
@@ -75,14 +75,15 @@ bf16: true
 bf16_full_eval: true
 num_train_epochs: 5 # This will be overridden by curriculum
 # max_steps: 5
-# do_eval: false
-per_device_eval_batch_size: 16
+do_eval: true
+per_device_eval_batch_size: 8
 report_to:
   - "clearml"
 seed: 42
 eval_strategy: epoch
 # eval_steps: 100
 save_strategy: epoch
-save_total_limit: 5
+save_total_limit: 10
 group_by_length: true
 load_best_model_at_end: false
+disable_tqdm: false

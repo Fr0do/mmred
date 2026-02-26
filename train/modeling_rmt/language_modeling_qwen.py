@@ -8,7 +8,6 @@ from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.models.qwen3.configuration_qwen3 import Qwen3Config
 from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 
-
 class MemoryCell(torch.nn.Module):
     def __init__(self, embeddings, num_mem_tokens):
         super().__init__()
@@ -20,17 +19,13 @@ class MemoryCell(torch.nn.Module):
             if hasattr(self, "memory"):
                 del self.memory
             self.register_parameter("memory", None)
-        # Create memory parameter
-        self.memory = Parameter(torch.empty(num_mem_tokens, self.embed_dim, dtype=embeddings.weight.dtype), requires_grad=True)
-        
-        # Initialization optimization: Small std dev or zeros to prevent initial shock
+        self.memory = Parameter(torch.empty(num_mem_tokens, embeddings.embedding_dim, dtype=embeddings.weight.dtype), requires_grad=False)
         with torch.no_grad():
-            self.memory.data.normal_(mean=0.0, std=embeddings.weight.data.std().item())
-
+            self.memory.data.normal_(mean=0.0, std=0.02)
     
     def forward(self, input):
-        memory = self.memory.unsqueeze(0).expand(input.size(0), -1, -1)
-        return memory.to(input.device)
+        memory = self.memory.repeat(input.size(0), 1, 1)
+        return memory.to(input.device, input.dtype)
 
 class RMTQwen3Config(Qwen3Config):
     model_type = "rmt-qwen3"
@@ -62,12 +57,14 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         self.memory_cell = MemoryCell(self.get_input_embeddings(), config.num_mem_tokens)
         self.num_mem_tokens = config.num_mem_tokens
 
-    def _pad_attention_mask(self, attention_mask: torch.Tensor, target_shape: torch.Size) -> torch.Tensor:
+    def _pad_attention_mask(self, attention_mask: torch.Tensor, shape: torch.Size, write_mem: bool = True) -> torch.Tensor:
         if self.num_mem_tokens in {0, None}:
             return attention_mask
-        mask = torch.ones(*target_shape[:2], dtype=attention_mask.dtype, device=attention_mask.device)
-        mask[:, self.num_mem_tokens : self.num_mem_tokens + attention_mask.shape[1]] = attention_mask
-        return mask
+        else:
+            last_ids = -self.num_mem_tokens if write_mem else None
+            mask = torch.ones(*shape[:2], dtype=torch.int64).to(attention_mask.device)
+            mask[:, self.num_mem_tokens:last_ids] = attention_mask
+            return mask
     
     def _prepare_segment_inputs(
         self,
@@ -77,7 +74,6 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         output_attentions: Optional[bool],
     ) -> Dict[str, Any]:
         seg_kwargs: Dict[str, Any] = {k: v for k, v in segment_kwargs.items() if v is not None}
-
         input_ids = seg_kwargs.pop("input_ids", None)
         inputs_embeds = seg_kwargs.get("inputs_embeds")
 
@@ -88,18 +84,23 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
 
         if self.num_mem_tokens not in {0, None}:
             if memory_state is None:
-                memory_state = self.memory_cell(inputs_embeds)
+                # memory_state = self.memory_cell(inputs_embeds)
+                memory_state = inputs_embeds.mean(1, keepdim=True).repeat(1, self.memory_cell.memory.size(0), 1)
             if write_mem:
                 inputs_embeds = torch.cat([memory_state, inputs_embeds, memory_state], dim=1)
             else:
                 inputs_embeds = torch.cat([memory_state, inputs_embeds], dim=1)
-
         seg_kwargs["inputs_embeds"] = inputs_embeds
         seg_kwargs["input_ids"] = None
 
+        # Generate position_ids for this segment (each segment starts at position 0
+        # because memory tokens are prepended and RoPE should be relative to segment start)
+        batch_size, seq_len, _ = inputs_embeds.shape
+        seg_kwargs["position_ids"] = torch.arange(seq_len, dtype=torch.long, device=inputs_embeds.device).unsqueeze(0).expand(batch_size, -1)
+
         attention_mask = seg_kwargs.get("attention_mask")
         if attention_mask is not None:
-            padded_mask = self._pad_attention_mask(attention_mask, inputs_embeds.shape)
+            padded_mask = self._pad_attention_mask(attention_mask, inputs_embeds.shape, write_mem)
             prev_attn_mask = seg_kwargs.pop("prev_attn_mask", None)
             if prev_attn_mask is not None:
                 padded_mask = torch.cat([prev_attn_mask, padded_mask], dim=-1)
@@ -109,8 +110,6 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         if output_attentions is not None:
             seg_kwargs["output_attentions"] = output_attentions
         seg_kwargs["return_dict"] = True
-        # TODO: maybe shift according to current segment?
-        seg_kwargs["position_ids"] = None 
 
         return seg_kwargs
 
@@ -152,8 +151,8 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
             write_mem=write_mem,
             output_attentions=kwargs.get("output_attentions"),
         )
-        filtered_seg_kwargs = {k: v for k, v in seg_kwargs.items() if k not in kwargs}
-        base_outputs = super().forward(labels=None, **filtered_seg_kwargs, **kwargs)
+        filtered_kwargs = {k: v for k, v in seg_kwargs.items() if k not in seg_kwargs}
+        base_outputs = super().forward(labels=None, use_cache=False, **seg_kwargs, **filtered_kwargs)
         return self._process_segment_output(base_outputs, write_mem=write_mem, output_hidden_states=output_hidden_states)
 
     def segment(self, **kwargs: torch.Tensor) -> List[Dict[str, torch.Tensor]]:
@@ -192,15 +191,13 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
         labels: Optional[torch.Tensor] = None,
         output_hidden_states: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
+        **kwargs: Any,
     ) -> CausalLMOutputWithPast:
         out = CausalLMOutputWithPast()
         logits = torch.cat([output.logits for output in cell_outputs], dim=1)
         out["logits"] = logits
         if labels is not None:
-            shift_labels = labels[..., 1:].contiguous()
-            shift_logits = logits[..., :-1, :].contiguous()
-            loss_fct = CrossEntropyLoss()
-            out["loss"] = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            out["loss"] = self.loss_function(logits, labels, vocab_size=self.config.vocab_size, **kwargs)
         else:
             out["loss"] = None
 
@@ -267,13 +264,14 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
 
         memory_state = None
         cell_outputs: List[CausalLMOutputWithPast] = []
-        output_attentions = kwargs.get("output_attentions")
-        output_hidden_states = kwargs.get("output_hidden_states")
+        output_attentions = kwargs.pop("output_attentions", False)
+        output_hidden_states = kwargs.pop("output_hidden_states", False)
+
         for seg_num, segment in enumerate(segmented):
             cell_out, memory_state = self._forward_segment(
                 {k: segment.get(k) for k in ("input_ids", "inputs_embeds", "attention_mask", "position_ids")},
                 memory_state=memory_state,
-                write_mem=True,
+                write_mem=True,# write_mem=seg_num < len(segmented) - 1,
                 output_hidden_states=output_hidden_states,
                 output_attentions=output_attentions,
             )
@@ -284,6 +282,7 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
             labels=labels,
             output_hidden_states=output_hidden_states,
             output_attentions=output_attentions,
+            **kwargs,
         )
 
         if not return_dict:
@@ -308,7 +307,7 @@ class RMTQwen3ForCausalLM(Qwen3ForCausalLM):
                 segment,
                 memory_state=memory_state,
                 write_mem=True,
-                output_hidden_states=True,
+                output_hidden_states=False,
                 output_attentions=False,
             )
 

@@ -222,7 +222,7 @@ def q_n_empty(seq_len, **kwargs):
     return df, q, a, AnswerTypeNumber
 
 
-# ### MMLong questions: ###
+# ### DC questions: ###
 
 
 def q_room_empty(seq_len, fraction: float = 1, is_more: bool = None, **kwargs):
