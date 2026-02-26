@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Render images from a generated MMRed dataset.
+"""Render images from a generated MMReD dataset.
 
 This script takes a JSON dataset file as input and renders frame images
 for each sequence. Images can be rendered as individual PNGs or combined GIFs.
@@ -67,7 +67,7 @@ def render_single_sample(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Render images from MMRed dataset.",
+        description="Render images from MMReD dataset.",
     )
     
     parser.add_argument(

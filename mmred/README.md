@@ -1,6 +1,6 @@
-# MMRed Library Documentation
+# <span style="color:red">MMReD</span> Library Documentation
 
-MMRed (Multimodal Reasoning Evaluation Dataset) is a library for generating and working with synthetic benchmarks for dense context reasoning evaluation.
+<span style="color:red">MMReD</span> (**M**ulti-**M**odal **R**easoning in **D**ense Context) is a library for generating and working with synthetic benchmarks for dense context reasoning evaluation.
 
 ## Table of Contents
 
@@ -106,7 +106,7 @@ Output is a JSON array of sample objects:
           "Hallway": []
         }
       },
-      ...
+      "..."
     ],
     "metadata": [
       {
@@ -120,8 +120,10 @@ Output is a JSON array of sample objects:
           "Hallway": false
         }
       },
-      ...
-    ]
+      "..."
+    ],
+    "n_relevant_rooms_per_step": [3, 0, 1, 2, 1, 0, 1, 2],
+    "n_relevant_rooms": 10
   }
 ]
 ```
@@ -133,13 +135,17 @@ Output is a JSON array of sample objects:
 | `qid` | string | Unique question ID (7 digits, zero-padded) |
 | `seq_len` | int | Number of steps in sequence |
 | `qtype` | string | Question type identifier |
-| `atype` | string | Answer type: "person", "room", or "number" |
+| `atype` | string | Answer type: `"person"`, `"room"`, or `"number"` |
 | `question` | string | Question text |
 | `answer` | str\|int | Correct answer |
 | `sequence` | Step[] | Sequence of room occupancy states |
 | `metadata` | MetadataStep[] | Room relevance per step for the answer |
+| `n_relevant_rooms_per_step` | int[] | Per-step count of relevant rooms (same length as `metadata`) |
+| `n_relevant_rooms` | int | Total relevant room-step pairs across the whole sequence |
 
-### Metadata Interpretation
+### Metadata Fields
+
+#### `metadata`
 
 The `metadata` field indicates which rooms at which steps are relevant for computing the answer:
 
@@ -147,6 +153,38 @@ The `metadata` field indicates which rooms at which steps are relevant for compu
 - `false` = This room at this step is not relevant
 
 For example, in `q_spend_alone`, metadata marks `true` for rooms where the answer character was alone at each step.
+
+#### `n_relevant_rooms_per_step`
+
+A list of integers with one value per step — the count of rooms whose metadata flag is `true` at that step.
+It has the same length as `metadata` and is a step-level summary of it.
+
+```python
+# Example: 8 steps, answer character was alone in 1 room at steps 1, 4, 5, 7, 8
+#          and in 2 rooms at step 3 (never happened, just illustration)
+sample["n_relevant_rooms_per_step"]
+# → [1, 0, 0, 1, 1, 0, 1, 1]
+```
+
+#### `n_relevant_rooms`
+
+A single integer — the global sum of all `true` flags across every step and every room.
+Equivalent to `sum(n_relevant_rooms_per_step)`.
+
+```python
+sample["n_relevant_rooms"]
+# → 5   (five room-step pairs were relevant for answering the question)
+```
+
+### Programmatic Access
+
+```python
+from mmred import aggregate_metadata_step, aggregate_metadata_global, MetadataStep
+
+# Recompute from a list of MetadataStep objects
+per_step = aggregate_metadata_step(metadata_list)   # list[int]
+total    = aggregate_metadata_global(metadata_list) # int
+```
 
 ---
 
@@ -283,26 +321,41 @@ class GenerationConfig:
 Generate questions with parallelization.
 
 **Args:** `config: GenerationConfig`  
-**Returns:** `list[dict]` - List of sample dictionaries
+**Returns:** `list[dict]` — List of sample dictionaries
 
 ### `mmred.generate_questions_sequential(config)`
 
 Generate questions without parallelization (for debugging).
 
 **Args:** `config: GenerationConfig`  
-**Returns:** `list[dict]` - List of sample dictionaries
+**Returns:** `list[dict]` — List of sample dictionaries
 
 ### `mmred.save_dataset(samples, output_path)`
 
 Save generated samples to JSON file.
 
 **Args:**
-- `samples: list[dict]` - Generated samples
-- `output_path: str | Path` - Output file path
+- `samples: list[dict]` — Generated samples
+- `output_path: str | Path` — Output file path
 
 ### `mmred.Sample`, `mmred.Step`, `mmred.MetadataStep`
 
-Data classes for structured data. Each has a `.to_dict()` method for serialization.
+Data classes for structured data. Each has a `.to_dict()` method for serialization
+and a `.from_dict()` class method for deserialization.
+
+### `mmred.aggregate_metadata_step(metadata)`
+
+Compute per-step relevance counts.
+
+**Args:** `metadata: list[MetadataStep]`  
+**Returns:** `list[int]` — One integer per step, counting rooms with `True` relevance flag
+
+### `mmred.aggregate_metadata_global(metadata)`
+
+Compute the total number of relevant room-step pairs.
+
+**Args:** `metadata: list[MetadataStep]`  
+**Returns:** `int` — Scalar sum of all `True` flags across all steps and rooms
 
 ### `mmred.QUESTIONS`
 
@@ -322,9 +375,11 @@ Key changes in v2.0:
 
 1. **Output format**: JSON array with inline sequences (no separate CSV files)
 2. **New `metadata` field**: Tracks room relevance per step
-3. **No video generation by default**: Use `scripts/render_images.py` separately
-4. **Dynamic configuration**: `GenerationConfig` replaces static `const.py`
-5. **Parallelized generation**: Uses `ProcessPoolExecutor` for speed
+3. **New `n_relevant_rooms_per_step` field**: Per-step count of relevant rooms
+4. **New `n_relevant_rooms` field**: Global count of relevant room-step pairs
+5. **No video generation by default**: Use `scripts/render_images.py` separately
+6. **Dynamic configuration**: `GenerationConfig` replaces static `const.py`
+7. **Parallelized generation**: Uses `ProcessPoolExecutor` for speed
 
 ### Before (v1.x)
 

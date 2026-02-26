@@ -1,14 +1,14 @@
-# MMReD Benchmark
+# <span style="color:red">MMReD</span> Benchmark
 
-Kurkin et al., *MMReD: a Cross-Modal Benchmark for Dense Context Reasoning*
+Kurkin et al., *<span style="color:red">MMReD</span>: a **M**ulti-**M**odal **R**easoning in **D**ense Context Benchmark*
 
 ## 📦 Installation
 
 Requires Python ≥ 3.8
 
 ```
-git clone git@github.com:Fr0do/long-vqa.git
-cd long-vqa
+git clone git@github.com:Fr0do/mmred.git
+cd mmred
 pip install -e .
 ```
 

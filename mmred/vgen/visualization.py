@@ -1,4 +1,4 @@
-"""Visualization functions for MMRed sequences.
+"""Visualization functions for MMReD sequences.
 
 This module provides functions to render sequences as images or GIFs
 from either DataFrame or JSON-serialized format.

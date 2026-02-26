@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Generate MMRed benchmark dataset.
+"""Generate MMReD benchmark dataset.
 
-This script generates the MMRed benchmark dataset with configurable parameters
+This script generates the MMReD benchmark dataset with configurable parameters
 for sequence lengths, question types, and output format.
 
 Example usage:
@@ -31,7 +31,7 @@ from mmred.qgen.questions import QUESTIONS
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate MMRed benchmark dataset.",
+        description="Generate MMReD benchmark dataset.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Available question types:

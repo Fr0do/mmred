@@ -1,6 +1,6 @@
 """Question generation orchestration with parallelization.
 
-This module provides the main entry point for generating MMRed benchmark
+This module provides the main entry point for generating MMReD benchmark
 questions with support for:
 - Parallelization across sequence lengths and question types
 - Reproducible seeding
@@ -18,7 +18,15 @@ from typing import Any
 import pandas as pd
 
 from ..config import GenerationConfig
-from ..data_model import Sample, Step, MetadataStep, serialize_sequence, create_metadata_from_relevance
+from ..data_model import (
+    Sample,
+    Step,
+    MetadataStep,
+    serialize_sequence,
+    create_metadata_from_relevance,
+    aggregate_metadata_step,
+    aggregate_metadata_global,
+)
 from .questions import QUESTIONS
 from .utils import hash_seq_df, create_rng
 
@@ -90,7 +98,11 @@ def _generate_batch(
             step_rooms = relevant_map.get(step_id, [])
             room_relevance = {room: room in step_rooms for room in rooms}
             metadata.append(MetadataStep(step_id=step_id, rooms=room_relevance))
-        
+
+        # Aggregate metadata fields
+        n_per_step = aggregate_metadata_step(metadata)
+        n_total = aggregate_metadata_global(metadata)
+
         samples.append({
             "seq_len": seq_len,
             "qtype": question_type,
@@ -99,6 +111,8 @@ def _generate_batch(
             "answer": a,
             "sequence": [s.to_dict() for s in sequence],
             "metadata": [m.to_dict() for m in metadata],
+            "n_relevant_rooms_per_step": n_per_step,
+            "n_relevant_rooms": n_total,
         })
     
     return samples

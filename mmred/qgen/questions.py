@@ -1,4 +1,4 @@
-"""Question generation functions for MMRed benchmark.
+"""Question generation functions for MMReD benchmark.
 
 Each question function now returns metadata indicating which rooms at which steps
 are relevant for answering the question.

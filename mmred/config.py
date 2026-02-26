@@ -1,6 +1,6 @@
-"""Configuration for MMRed dataset generation.
+"""Configuration for MMReD dataset generation.
 
-This module provides a flexible configuration system for the MMRed benchmark
+This module provides a flexible configuration system for the MMReD benchmark
 generator, replacing the static const.py values with a dynamic dataclass-based
 configuration.
 """
@@ -19,7 +19,7 @@ DEFAULT_CHARS = ["Sandra", "Mary", "John", "Daniel", "Michael"]
 
 @dataclass
 class GenerationConfig:
-    """Configuration for MMRed dataset generation.
+    """Configuration for MMReD dataset generation.
     
     Attributes:
         seed: Random seed for reproducibility
