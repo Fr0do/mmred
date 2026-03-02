@@ -392,6 +392,52 @@ def q_n_empty(
     return df, q, a, AnswerTypeNumber, relevant_map
 
 
+def q_spend_alone_at_time(
+    seq_len: int,
+    fraction: float = 1,
+    is_more: bool = None,
+    chars: list[str] = None,
+    rooms: list[str] = None,
+    rng: random.Random = None,
+    **kwargs,
+) -> QuestionResult:
+    "Who was alone in the rooms at step X?"
+    chars = chars or DEFAULT_CHARS
+    rooms = rooms or DEFAULT_ROOMS
+    rng = rng or random
+    
+    df, char, _, _, _, frame = get_random_situation(seq_len, chars, rooms, rng)
+
+    def _check_df_return_answer(_df):
+        # breakpoint()
+        row = _df.iloc[frame]
+        alone_chars = {c: 0 for c in chars}
+        comp_fn = max if is_more else min
+        ur, urc = np.unique(row, return_counts=True)
+        for r in ur[urc == 1]:
+            alone_chars[np.array(chars)[row == r].item()] += 1
+
+        alone_values = np.array(list(alone_chars.values()))
+        all_persons = np.array(list(alone_chars.keys()))
+
+        alone_persons = all_persons[alone_values == 1]
+        if alone_persons.size == 0:
+            return NOBODY, None
+        return comp_fn(alone_persons).item(), row[comp_fn(alone_persons).item()]
+
+    a, room = _check_df_return_answer(df)
+    while a is None:
+        df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
+        a, room = _check_df_return_answer(df)
+
+    q = f"Who was alone at time {frame}?"
+    
+    # Metadata: the queried frame, the room where char was
+    relevant_map = {frame: [room]}
+    
+    return df, q, a, AnswerTypePerson, relevant_map
+
+
 # ### DC questions: ###
 
 
@@ -594,7 +640,8 @@ def q_spend_alone(
     chars = chars or DEFAULT_CHARS
     rooms = rooms or DEFAULT_ROOMS
     rng = rng or random
-    
+    breakpoint()
+
     df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
     is_more, q_start, frame_0, frame_1, q_end = get_random_mmlong(
         seq_len, fraction, is_more=is_more, rng=rng
@@ -816,4 +863,5 @@ QUESTIONS = {
     "steps_in_room": q_steps_in_room,
     "rooms_visited": q_rooms_visited,
     "crowd_count": q_crowd_count,
+    "spend_alone_at_step": q_spend_alone_at_time 
 }
