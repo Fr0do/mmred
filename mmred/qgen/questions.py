@@ -394,7 +394,6 @@ def q_n_empty(
 
 def q_spend_alone_at_time(
     seq_len: int,
-    fraction: float = 1,
     is_more: bool = None,
     chars: list[str] = None,
     rooms: list[str] = None,
