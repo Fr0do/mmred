@@ -408,10 +408,8 @@ def q_spend_alone_at_time(
     df, char, _, _, _, frame = get_random_situation(seq_len, chars, rooms, rng)
 
     def _check_df_return_answer(_df):
-        # breakpoint()
         row = _df.iloc[frame]
         alone_chars = {c: 0 for c in chars}
-        comp_fn = max if is_more else min
         ur, urc = np.unique(row, return_counts=True)
         for r in ur[urc == 1]:
             alone_chars[np.array(chars)[row == r].item()] += 1
@@ -422,17 +420,21 @@ def q_spend_alone_at_time(
         alone_persons = all_persons[alone_values == 1]
         if alone_persons.size == 0:
             return NOBODY, None
-        return comp_fn(alone_persons).item(), row[comp_fn(alone_persons).item()]
+        sorted_persons = sorted(alone_persons)
+        answer = sorted_persons[-1] if is_more else sorted_persons[0]
+        return answer, row[answer]
 
     a, room = _check_df_return_answer(df)
     while a is None:
         df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
         a, room = _check_df_return_answer(df)
 
-    q = f"Who was alone at time {frame}?"
+    order_word = "maximal" if is_more else "minimal"
+    # Use frame + 1 because step_ids in the sequence are 1-based
+    q = f"Who was alone at time {frame + 1}? If there are several people alone, return the one with {order_word} lexicographic name."
     
-    # Metadata: the queried frame, the room where char was
-    relevant_map = {frame: [room]}
+    # Metadata: the queried frame (1-based), the room where char was
+    relevant_map = {frame + 1: [room]}
     
     return df, q, a, AnswerTypePerson, relevant_map
 
