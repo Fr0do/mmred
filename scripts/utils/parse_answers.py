@@ -223,14 +223,10 @@ def process_model_data(path, debug=False):
         model_name = "/".join(path.split("answers_")[-1].split(".csv")[0].split("_", 1))
         df_answers["model"] = model_name
 
-        # Calculate hit rate
-        hit_rate = (
-            df_answers.groupby(["seq_len", "qtype"])["hit"]
-            .sum()
-            .div(50)
-            .sort_index()
-            .to_frame("hit")
-        )
+        # Calculate hit rate (adaptive: use actual count per group instead of hardcoded 50)
+        grouped = df_answers.groupby(["seq_len", "qtype"])["hit"].agg(["sum", "count"])
+        grouped["hit"] = grouped["sum"] / grouped["count"]
+        hit_rate = grouped[["hit"]].sort_index()
         hit_rate["model"] = model_name
 
         return hit_rate.set_index(["model"], append=True)
