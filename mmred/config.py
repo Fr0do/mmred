@@ -33,6 +33,8 @@ class GenerationConfig:
             - int: exact number of keyframes
             - tuple[int, int]: range of keyframes (min, max)
             - list[int]: specific keyframe counts to generate (one sample per count)
+        n_questions_per_type: If set, number of questions per question type per
+            seq_len (types with 0 are skipped). When None, use uniform n_questions.
     """
     
     seed: int = DEFAULT_SEED
@@ -42,11 +44,30 @@ class GenerationConfig:
     rooms: list[str] = field(default_factory=lambda: DEFAULT_ROOMS.copy())
     chars: list[str] = field(default_factory=lambda: DEFAULT_CHARS.copy())
     target_keyframes: int | tuple[int, int] | list[int] | None = None
+    n_questions_per_type: dict[str, int] | None = None
     
     def __post_init__(self):
         """Validate configuration after initialization."""
-        if self.n_questions < 1:
-            raise ValueError("n_questions must be at least 1")
+        if self.n_questions_per_type is None:
+            if self.n_questions < 1:
+                raise ValueError("n_questions must be at least 1")
+        else:
+            if self.question_types is None:
+                raise ValueError(
+                    "n_questions_per_type requires an explicit question_types list"
+                )
+            qt_set = set(self.question_types)
+            per_keys = set(self.n_questions_per_type.keys())
+            if qt_set != per_keys:
+                raise ValueError(
+                    "n_questions_per_type keys must exactly match question_types: "
+                    f"question_types={sorted(qt_set)}, dict keys={sorted(per_keys)}"
+                )
+            for q, n in self.n_questions_per_type.items():
+                if n < 0:
+                    raise ValueError(f"n_questions_per_type[{q!r}] must be >= 0")
+            if sum(self.n_questions_per_type.values()) < 1:
+                raise ValueError("n_questions_per_type must have at least one positive count")
         if not self.seq_lengths:
             raise ValueError("seq_lengths cannot be empty")
         if not self.rooms:
@@ -81,6 +102,7 @@ class GenerationConfig:
             "rooms": self.rooms,
             "chars": self.chars,
             "target_keyframes": self.target_keyframes,
+            "n_questions_per_type": self.n_questions_per_type,
         }
     
     def get_question_types(self, available_types: Sequence[str]) -> list[str]:
@@ -101,3 +123,9 @@ class GenerationConfig:
             raise ValueError(f"Unknown question types: {unknown}")
         
         return self.question_types
+
+    def n_for_question_type(self, qtype: str) -> int:
+        """Number of questions to generate for this type at each seq_len."""
+        if self.n_questions_per_type is not None:
+            return self.n_questions_per_type[qtype]
+        return self.n_questions

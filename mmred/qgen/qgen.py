@@ -134,7 +134,9 @@ def generate_questions(config: GenerationConfig) -> list[dict[str, Any]]:
     tasks = []
     for seq_len in config.seq_lengths:
         for qtype in question_types:
-            tasks.append((seq_len, qtype))
+            n_q = config.n_for_question_type(qtype)
+            if n_q > 0:
+                tasks.append((seq_len, qtype, n_q))
     
     # Use ProcessPoolExecutor for parallel generation
     with ProcessPoolExecutor() as executor:
@@ -143,12 +145,12 @@ def generate_questions(config: GenerationConfig) -> list[dict[str, Any]]:
                 _generate_batch,
                 seq_len,
                 qtype,
-                config.n_questions,
+                n_q,
                 config.seed,
                 config.chars,
                 config.rooms,
             ): (seq_len, qtype)
-            for seq_len, qtype in tasks
+            for seq_len, qtype, n_q in tasks
         }
         
         for future in as_completed(futures):
@@ -180,10 +182,13 @@ def generate_questions_sequential(config: GenerationConfig) -> list[dict[str, An
     
     for seq_len in config.seq_lengths:
         for qtype in question_types:
+            n_q = config.n_for_question_type(qtype)
+            if n_q <= 0:
+                continue
             batch_samples = _generate_batch(
                 seq_len,
                 qtype,
-                config.n_questions,
+                n_q,
                 config.seed,
                 config.chars,
                 config.rooms,
