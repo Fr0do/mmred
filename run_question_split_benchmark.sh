@@ -6,7 +6,7 @@ set -euo pipefail
 # Configuration (override via env vars)
 ###############################################################################
 
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-1.7B}"
 
 # You must have vLLM server running on this port (see vllm_servers.sh).
 VLLM_PORT="${VLLM_PORT:-8003}"
@@ -21,8 +21,11 @@ RESULTS_DIR="${RESULTS_DIR:-mmred/results_${MODEL_NAME}}"
 SEQ_LENGTHS="${SEQ_LENGTHS:-16}"
 
 SEED="${SEED:-12345}"
-QUESTION_TYPES="${QUESTION_TYPES:-spend_alone_at_step where_spend n_empty}"
+QUESTION_TYPES="${QUESTION_TYPES:-spend_alone_at_step crowded_room}"
 TARGET_QUESTION_TYPE="${TARGET_QUESTION_TYPE:-spend_alone_at_step}"
+
+# Optional: total questions per split JSON for each seq_len (must divide that seq_len).
+# Unset => split_total questions per file (multiplier 1 in generate_dataset.py).
 
 SEMAPHORE_LIMIT="${SEMAPHORE_LIMIT:-32}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
@@ -31,7 +34,7 @@ THINKING="${THINKING:-0}"
 
 # Controls whether we overwrite generated split JSONs and inference CSVs.
 # (This script always overwrites parse_answers outputs; inference can be skipped by existing CSVs.)
-REWRITE_DATA_CACHE="${REWRITE_DATA_CACHE:-0}"
+REWRITE_DATA_CACHE="${REWRITE_DATA_CACHE:-1}"
 
 PLOT_ACCURACY_PNG="${PLOT_ACCURACY_PNG:-1}"
 
@@ -57,6 +60,8 @@ Optional env:
   - VLLM_PORT (default: 8003)
   - SEQ_LENGTHS (default: "16 32 64 128 256")
   - SEED (default: 12345)
+  - N_QUESTIONS (optional) total questions in each split JSON for that seq_len;
+      must be divisible by seq_len. Unset => seq_len (same as multiplier 1).
   - SEMAPHORE_LIMIT, BATCH_SIZE
   - PREFIX_QUESTION, THINKING
   - REWRITE_DATA_CACHE (default: 0)
@@ -84,7 +89,7 @@ done
 echo "=== Config ==="
 echo "MODEL_NAME=$MODEL_NAME TARGET_QUESTION_TYPE=$TARGET_QUESTION_TYPE"
 echo "QUESTION_TYPES=$QUESTION_TYPES"
-echo "SEQ_LENGTHS=$SEQ_LENGTHS SEED=$SEED"
+echo "SEQ_LENGTHS=$SEQ_LENGTHS SEED=$SEED N_QUESTIONS=${N_QUESTIONS:-1200}"
 echo "VLLM_PORT=$VLLM_PORT"
 echo "INPUT_DIR=$INPUT_DIR RESULTS_DIR=$RESULTS_DIR"
 echo "PLOT_ACCURACY_PNG=$PLOT_ACCURACY_PNG REWRITE_DATA_CACHE=$REWRITE_DATA_CACHE FORCE_SPLIT_REGEN=$FORCE_SPLIT_REGEN"
@@ -170,12 +175,30 @@ for SEQ in $SEQ_LENGTHS; do
   echo "================ seq_len=$SEQ ================"
 
   split_total="$SEQ"
+  if [[ "$split_total" -lt 1 ]]; then
+    echo "Error: seq_len must be >= 1 (got $split_total)" >&2
+    exit 1
+  fi
+
+  Q_PER_SPLIT="${N_QUESTIONS:-$split_total}"
+  if ! [[ "$Q_PER_SPLIT" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: N_QUESTIONS (questions per split file) must be a positive integer, got: '$Q_PER_SPLIT'" >&2
+    exit 1
+  fi
+  if (( Q_PER_SPLIT % split_total != 0 )); then
+    echo "Error: N_QUESTIONS=$Q_PER_SPLIT must be divisible by seq_len=$split_total (for integer split multiplier)." >&2
+    exit 1
+  fi
+  NQ_MULTIPLIER=$(( Q_PER_SPLIT / split_total ))
+  echo "Questions per split file: $Q_PER_SPLIT (generate_dataset --n_questions multiplier: $NQ_MULTIPLIER)"
+  echo
+
   width="${#split_total}"
   [[ "$width" -lt 2 ]] && width=2
 
   # Base path: generator will emit:
   #   <base>_split_00.json, ... , <base>_split_${split_total}.json
-  GENERATION_BASE="${INPUT_DIR}/generated_datasets/${MODEL_NAME}/seq${SEQ}/qsplit_${TARGET_QUESTION_TYPE}_${_qt_tag}.json"
+  GENERATION_BASE="${INPUT_DIR}/generated_datasets/${MODEL_NAME}/seq${SEQ}/qsplit_${TARGET_QUESTION_TYPE}_nq${Q_PER_SPLIT}_${_qt_tag}.json"
 
   if [[ "$FORCE_SPLIT_REGEN" -eq 1 ]]; then
     rm -f "${GENERATION_BASE%.*}"_split_*.json >/dev/null 2>&1 || true
@@ -189,6 +212,7 @@ for SEQ in $SEQ_LENGTHS; do
       --target_question_type \"${TARGET_QUESTION_TYPE}\" \
       --question_types ${QUESTION_TYPES} \
       --split_total \"${split_total}\" \
+      --n_questions \"${NQ_MULTIPLIER}\" \
       --seed \"${SEED}\""
   else
     echo "Split JSONs exist, skipping generation (set FORCE_SPLIT_REGEN=1 to regenerate)."
@@ -208,7 +232,7 @@ for SEQ in $SEQ_LENGTHS; do
     fi
 
     # Unique exp name per split so parse_answers can glob safely.
-    exp_name="qsplit_seq${SEQ}_k${k}_seed${SEED}_thinking${THINKING}_prefix${PREFIX_QUESTION}_${_qt_tag}"
+    exp_name="qsplit_seq${SEQ}_k${k}_nq${Q_PER_SPLIT}_seed${SEED}_thinking${THINKING}_prefix${PREFIX_QUESTION}_${_qt_tag}"
 
     raw_csv="${INPUT_DIR}/${exp_name}/qa_pairs_answers_${k}_${TARGET_QUESTION_TYPE}.csv"
     results_csv="${RESULTS_DIR}/${exp_name}_newest_results.csv"
