@@ -1,0 +1,99 @@
+{
+  "metadata": {
+    "benchmark": "MMReD",
+    "metric": "F1",
+    "description": "Mock benchmark results for context density scaling analysis"
+  },
+  "models": [
+    {
+      "name": "GPT-4o",
+      "color": "#2563EB",
+      "marker": "o",
+      "results": [
+        {"density": 0.05, "accuracy": 0.43},
+        {"density": 0.10, "accuracy": 0.51},
+        {"density": 0.20, "accuracy": 0.63},
+        {"density": 0.30, "accuracy": 0.72},
+        {"density": 0.40, "accuracy": 0.76},
+        {"density": 0.50, "accuracy": 0.78},
+        {"density": 0.60, "accuracy": 0.74},
+        {"density": 0.70, "accuracy": 0.67},
+        {"density": 0.80, "accuracy": 0.56},
+        {"density": 0.90, "accuracy": 0.47},
+        {"density": 0.95, "accuracy": 0.42}
+      ]
+    },
+    {
+      "name": "Claude 3.5 S.",
+      "color": "#9333EA",
+      "marker": "s",
+      "results": [
+        {"density": 0.05, "accuracy": 0.40},
+        {"density": 0.10, "accuracy": 0.47},
+        {"density": 0.20, "accuracy": 0.59},
+        {"density": 0.30, "accuracy": 0.67},
+        {"density": 0.40, "accuracy": 0.71},
+        {"density": 0.50, "accuracy": 0.73},
+        {"density": 0.60, "accuracy": 0.70},
+        {"density": 0.70, "accuracy": 0.62},
+        {"density": 0.80, "accuracy": 0.52},
+        {"density": 0.90, "accuracy": 0.44},
+        {"density": 0.95, "accuracy": 0.39}
+      ]
+    },
+    {
+      "name": "Gemini 1.5 Pro",
+      "color": "#DC2626",
+      "marker": "^",
+      "results": [
+        {"density": 0.05, "accuracy": 0.36},
+        {"density": 0.10, "accuracy": 0.43},
+        {"density": 0.20, "accuracy": 0.55},
+        {"density": 0.30, "accuracy": 0.63},
+        {"density": 0.40, "accuracy": 0.66},
+        {"density": 0.50, "accuracy": 0.66},
+        {"density": 0.60, "accuracy": 0.63},
+        {"density": 0.70, "accuracy": 0.56},
+        {"density": 0.80, "accuracy": 0.46},
+        {"density": 0.90, "accuracy": 0.38},
+        {"density": 0.95, "accuracy": 0.35}
+      ]
+    },
+    {
+      "name": "Llama 3.1 70B",
+      "color": "#059669",
+      "marker": "D",
+      "results": [
+        {"density": 0.05, "accuracy": 0.28},
+        {"density": 0.10, "accuracy": 0.34},
+        {"density": 0.20, "accuracy": 0.44},
+        {"density": 0.30, "accuracy": 0.51},
+        {"density": 0.40, "accuracy": 0.54},
+        {"density": 0.50, "accuracy": 0.55},
+        {"density": 0.60, "accuracy": 0.52},
+        {"density": 0.70, "accuracy": 0.46},
+        {"density": 0.80, "accuracy": 0.38},
+        {"density": 0.90, "accuracy": 0.31},
+        {"density": 0.95, "accuracy": 0.28}
+      ]
+    },
+    {
+      "name": "Mistral Large",
+      "color": "#D97706",
+      "marker": "v",
+      "results": [
+        {"density": 0.05, "accuracy": 0.23},
+        {"density": 0.10, "accuracy": 0.29},
+        {"density": 0.20, "accuracy": 0.38},
+        {"density": 0.30, "accuracy": 0.43},
+        {"density": 0.40, "accuracy": 0.46},
+        {"density": 0.50, "accuracy": 0.46},
+        {"density": 0.60, "accuracy": 0.44},
+        {"density": 0.70, "accuracy": 0.38},
+        {"density": 0.80, "accuracy": 0.32},
+        {"density": 0.90, "accuracy": 0.25},
+        {"density": 0.95, "accuracy": 0.22}
+      ]
+    }
+  ]
+}
