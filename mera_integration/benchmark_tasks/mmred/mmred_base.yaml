@@ -11,15 +11,14 @@ doc_to_text: "{{instruction.format(**inputs).strip()}}"
 doc_to_target: "outputs"
 target_delimiter: "\nAnswer: "
 
-# Multimodal: image loading
-doc_to_image: !function utils.doc_to_image
+# Multimodal: image loading (uncomment for VLM evaluation)
+# doc_to_image: !function utils.doc_to_image
 
 # Generation settings
 generation_kwargs:
   do_sample: false
-  max_gen_toks: 100  # Allow reasoning chains
+  max_gen_toks: 32768
   until:
-    - "\n\n"
     - "\nQuestion:"
 
 # Answer extraction filters

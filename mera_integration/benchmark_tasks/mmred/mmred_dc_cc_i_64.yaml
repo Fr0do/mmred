@@ -1,7 +1,6 @@
 # MMReD DC_CC_I (Length 64)
 include: mmred_base.yaml
 tag:
-  - mmred
   - mmred_dc
   - mera_all
 task: mmred_dc_cc_i_64

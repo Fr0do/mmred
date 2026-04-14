@@ -151,6 +151,7 @@ def convert_to_mera_format(
     prompt_template: str,
     mode: Literal["text", "image"] = "text",
     image_dir: Path | None = None,
+    language: str = "en",
 ) -> dict:
     """Convert MMReD sample to MERA dataset format.
     
@@ -175,7 +176,7 @@ def convert_to_mera_format(
         # Image paths for doc_to_image
         image_paths = [f"{qid}/step_{i+1:04d}.png" for i in range(seq_len)]
     else:
-        context = format_sequence_as_text(sample["sequence"])
+        context = format_sequence_as_text(sample["sequence"], language)
         image_paths = None
     
     # Build MERA sample
@@ -241,12 +242,17 @@ def generate_mera_dataset(
     if seq_lengths is None:
         seq_lengths = MERA_SEQ_LENGTHS
     
+    # Set up language-specific names
+    lang = Language.from_code(language)
+
     # Generate base dataset
     config = GenerationConfig(
         seed=seed,
         seq_lengths=seq_lengths,
         n_questions=n_questions,
         question_types=question_types,
+        rooms=lang.rooms,
+        chars=lang.chars,
     )
     
     print(f"Generating MMReD dataset...")
@@ -258,6 +264,14 @@ def generate_mera_dataset(
     
     samples = generate_questions_sequential(config)
     print(f"  Generated {len(samples)} samples")
+
+    # Translate question texts if needed
+    if language == "ru":
+        for sample in samples:
+            sample["question"] = lang.translate_question(sample["question"])
+            # Translate "Nobody" answer
+            if sample["answer"] == "Nobody":
+                sample["answer"] = lang.nobody
     
     # Get instruction prompt
     prompt_template = get_instruction_prompt(language, mode)
@@ -275,6 +289,7 @@ def generate_mera_dataset(
         mera_sample = convert_to_mera_format(
             sample, prompt_template, mode,
             image_dir=output_dir / "images" if render_images else None,
+            language=language,
         )
         datasets[dataset_name].append(mera_sample)
     
@@ -334,7 +349,20 @@ def generate_mera_dataset(
             question_types=question_types,
             seed=seed + 12345,  # Different seed to avoid overlap with test set
             overwrite=True,
+            chars=lang.chars,
+            rooms=lang.rooms,
         )
+
+        # Translate few-shot questions if needed
+        if language == "ru":
+            with open(few_shot_file, "r") as f:
+                raw_examples_pre = json.load(f)
+            for ex in raw_examples_pre:
+                ex["question"] = lang.translate_question(ex["question"])
+                if ex["answer"] == "Nobody":
+                    ex["answer"] = lang.nobody
+            with open(few_shot_file, "w", encoding="utf-8") as f:
+                json.dump(raw_examples_pre, f, ensure_ascii=False, indent=2)
         
         # Load and format for MERA shots.json
         with open(few_shot_file, "r") as f:

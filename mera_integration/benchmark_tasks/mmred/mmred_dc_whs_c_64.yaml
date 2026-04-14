@@ -1,7 +1,6 @@
 # MMReD DC_WHS_C (Length 64)
 include: mmred_base.yaml
 tag:
-  - mmred
   - mmred_dc
   - mera_all
 task: mmred_dc_whs_c_64

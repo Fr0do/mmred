@@ -6,9 +6,19 @@ This module provides:
 - Image loading for multimodal evaluation
 """
 
+import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, List, Union
+
+try:
+    from lm_eval.api.filter import Filter
+except ImportError:
+    from abc import ABC, abstractmethod
+    class Filter(ABC):
+        def __init__(self, **kwargs): pass
+        @abstractmethod
+        def apply(self, resps, docs): return resps
 
 try:
     from PIL import Image
@@ -43,37 +53,39 @@ def normalize_answer(answer: str, atype: str) -> str:
     # For person/room: capitalize first letter, handle common variations
     answer = answer.lower().strip()
     
-    # Common answer normalizations
+    # Common answer normalizations (Russian dataset is primary)
     normalizations = {
-        "kitchen": "Kitchen",
-        "bathroom": "Bathroom",
-        "garden": "Garden",
-        "office": "Office",
-        "bedroom": "Bedroom",
-        "hallway": "Hallway",
-        "sandra": "Sandra",
-        "mary": "Mary",
-        "john": "John",
-        "daniel": "Daniel",
-        "michael": "Michael",
-        "nobody": "Nobody",
-        "no one": "Nobody",
-        "none": "Nobody",
-        # Russian normalizations
-        "кухня": "Kitchen",
-        "ванная": "Bathroom",
-        "сад": "Garden",
-        "офис": "Office",
-        "спальня": "Bedroom",
-        "коридор": "Hallway",
-        "сандра": "Sandra",
-        "мария": "Mary",
-        "иван": "John",
-        "даниил": "Daniel",
-        "михаил": "Michael",
-        "никто": "Nobody",
+        # Russian canonical forms
+        "кухня": "Кухня",
+        "ванная": "Ванная",
+        "сад": "Сад",
+        "офис": "Офис",
+        "спальня": "Спальня",
+        "коридор": "Коридор",
+        "сандра": "Сандра",
+        "мария": "Мария",
+        "иван": "Иван",
+        "даниил": "Даниил",
+        "михаил": "Михаил",
+        "никто": "Никто",
+        "никого": "Никто",
+        # English fallbacks (map to Russian canonical)
+        "kitchen": "Кухня",
+        "bathroom": "Ванная",
+        "garden": "Сад",
+        "office": "Офис",
+        "bedroom": "Спальня",
+        "hallway": "Коридор",
+        "sandra": "Сандра",
+        "mary": "Мария",
+        "john": "Иван",
+        "daniel": "Даниил",
+        "michael": "Михаил",
+        "nobody": "Никто",
+        "no one": "Никто",
+        "none": "Никто",
     }
-    
+
     return normalizations.get(answer, answer.capitalize())
 
 
@@ -94,10 +106,34 @@ def extract_answer(text: str, atype: str = "person") -> str:
     """
     if not text:
         return ""
-    
+
     text = text.strip()
+
+    # Strip reasoning blocks: <think>...</think> and <|channel>thought...
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"<\|channel>thought.*?(?=<\|channel>|$)", "", text, flags=re.DOTALL)
+    text = text.strip()
+
+    if not text:
+        return ""
+
     answer = None
-    
+
+    # Pattern 0: JSON {"answer": "value"} — most common structured output
+    json_match = re.search(r'\{\s*["\']answer["\']\s*:\s*["\']?([^"\'}\s]+)["\']?\s*\}', text)
+    if json_match:
+        return normalize_answer(json_match.group(1), atype)
+
+    # Also try parsing actual JSON
+    json_block = re.search(r'\{[^{}]*"answer"[^{}]*\}', text)
+    if json_block:
+        try:
+            obj = json.loads(json_block.group(0))
+            if "answer" in obj:
+                return normalize_answer(str(obj["answer"]), atype)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
     # Pattern 1: "The answer is X" / "Answer: X" / "Result: X"
     patterns = [
         r"(?:the\s+)?(?:answer|result)\s*(?:is|:)\s*['\"]?([A-Za-zА-Яа-я0-9]+)['\"]?",
@@ -142,25 +178,21 @@ def extract_answer(text: str, atype: str = "person") -> str:
     return normalize_answer(answer or "", atype)
 
 
-def extract_answer_filter(resps, docs):
-    """Filter function for lm-evaluation-harness.
-    
-    Extracts answers from model responses.
-    
-    Args:
-        resps: List of model responses (each is a list with one response)
-        docs: List of document dictionaries
-        
-    Returns:
-        List of extracted answer strings
-    """
-    extracted = []
-    for resp, doc in zip(resps, docs):
-        text = resp[0] if isinstance(resp, list) else resp
-        atype = doc.get("meta", {}).get("atype", "person")
-        answer = extract_answer(text, atype)
-        extracted.append([answer])  # Keep as list for pipeline
-    return extracted
+class extract_answer_filter(Filter):
+    """Filter class for lm-evaluation-harness that extracts answers from model outputs."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def apply(self, resps: list, docs: list[dict]) -> list:
+        extracted = []
+        for resp, doc in zip(resps, docs):
+            text = resp[0] if isinstance(resp, list) else resp
+            meta = doc.get("meta", {})
+            atype = meta.get("categories", {}).get("atype", meta.get("atype", "person"))
+            answer = extract_answer(text, atype)
+            extracted.append([answer])
+        return extracted
 
 
 # ============================================================================
@@ -178,9 +210,10 @@ def process_results(doc: dict, results: list[str]) -> dict[str, float]:
         Dictionary of metric name to value
     """
     meta = doc.get("meta", {})
-    task = meta.get("task", "unknown")
-    seq_len = meta.get("seq_len", 0)
-    atype = meta.get("atype", "person")
+    categories = meta.get("categories", {})
+    task = categories.get("task_type", meta.get("task", "unknown"))
+    seq_len = categories.get("seq_len", meta.get("seq_len", 0))
+    atype = categories.get("atype", meta.get("atype", "person"))
     
     gold = normalize_answer(str(doc.get("outputs", "")), atype)
     pred = normalize_answer(str(results[0]) if results else "", atype)
