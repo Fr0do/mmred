@@ -17,7 +17,7 @@ target_delimiter: "\nAnswer: "
 # Generation settings
 generation_kwargs:
   do_sample: false
-  max_gen_toks: 32768
+  max_gen_toks: 8192
   until:
     - "\nQuestion:"
 

@@ -109,9 +109,14 @@ def extract_answer(text: str, atype: str = "person") -> str:
 
     text = text.strip()
 
-    # Strip reasoning blocks: <think>...</think> and <|channel>thought...
+    # Strip reasoning blocks: <think>...</think> and Gemma-4 <|channel>thought...<channel|>
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    text = re.sub(r"<\|channel>thought.*?(?=<\|channel>|$)", "", text, flags=re.DOTALL)
+    # Gemma-4 format: <|channel>thought...reasoning...<channel|>answer
+    gemma_match = re.search(r"<channel\|>\s*(.+)", text, flags=re.DOTALL)
+    if gemma_match:
+        text = gemma_match.group(1)
+    else:
+        text = re.sub(r"<\|channel>thought.*?(?=<\|channel>|$)", "", text, flags=re.DOTALL)
     text = text.strip()
 
     if not text:
