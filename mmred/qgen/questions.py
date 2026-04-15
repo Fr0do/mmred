@@ -392,6 +392,45 @@ def q_n_empty(
     return df, q, a, AnswerTypeNumber, relevant_map
 
 
+def spend_alone_at_time_from_df(
+    df: pd.DataFrame,
+    frame: int,
+    is_more: bool | None,
+    chars: list[str] = None,
+    rooms: list[str] = None,
+) -> tuple[str, Any, str, dict[int, list[str]]]:
+    """Build spend_alone_at_step question on a fixed sequence (frame is 0-based row index)."""
+    chars = chars or DEFAULT_CHARS
+    rooms = rooms or DEFAULT_ROOMS
+    row = df.iloc[frame]
+    alone_chars = {c: 0 for c in chars}
+    ur, urc = np.unique(row, return_counts=True)
+    for r in ur[urc == 1]:
+        alone_chars[np.array(chars)[row == r].item()] += 1
+
+    alone_values = np.array(list(alone_chars.values()))
+    all_persons = np.array(list(alone_chars.keys()))
+
+    alone_persons = all_persons[alone_values == 1]
+    if alone_persons.size == 0:
+        a = NOBODY
+        room = None
+    else:
+        use_more = bool(is_more) if is_more is not None else False
+        sorted_persons = sorted(alone_persons)
+        a = sorted_persons[-1] if use_more else sorted_persons[0]
+        room = row[a]
+
+    order_word = "maximal" if (bool(is_more) if is_more is not None else False) else "minimal"
+    q = (
+        f"Who was alone at time {frame + 1}? If there are several people alone, "
+        f"return the one with {order_word} lexicographic name."
+    )
+    rel_rooms: list[str] = [] if room is None else [room]
+    relevant_map = {frame + 1: rel_rooms}
+    return q, a, AnswerTypePerson, relevant_map
+
+
 def q_spend_alone_at_time(
     seq_len: int,
     is_more: bool = None,
@@ -404,39 +443,89 @@ def q_spend_alone_at_time(
     chars = chars or DEFAULT_CHARS
     rooms = rooms or DEFAULT_ROOMS
     rng = rng or random
-    
-    df, char, _, _, _, frame = get_random_situation(seq_len, chars, rooms, rng)
 
-    def _check_df_return_answer(_df):
-        row = _df.iloc[frame]
-        alone_chars = {c: 0 for c in chars}
-        ur, urc = np.unique(row, return_counts=True)
-        for r in ur[urc == 1]:
-            alone_chars[np.array(chars)[row == r].item()] += 1
+    df, _, _, _, _, frame = get_random_situation(seq_len, chars, rooms, rng)
+    q, a, atype, relevant_map = spend_alone_at_time_from_df(df, frame, is_more, chars, rooms)
+    return df, q, a, atype, relevant_map
 
-        alone_values = np.array(list(alone_chars.values()))
-        all_persons = np.array(list(alone_chars.keys()))
 
-        alone_persons = all_persons[alone_values == 1]
-        if alone_persons.size == 0:
-            return NOBODY, None
-        sorted_persons = sorted(alone_persons)
-        answer = sorted_persons[-1] if is_more else sorted_persons[0]
-        return answer, row[answer]
+def crowded_room_from_df(
+    df: pd.DataFrame,
+    seq_len: int,
+    chars: list[str],
+    rooms: list[str],
+    rng: random.Random,
+    fraction: float = 1.0,
+    n_crowd: int = 3,
+    max_tries: int = 100,
+) -> tuple[str, Any, str, dict[int, list[str]]] | None:
+    """Same semantics as q_crowded_room but on a fixed DataFrame; None if no valid window."""
+    for _ in range(max_tries):
+        _, _, frame_0, frame_1, q_end = get_random_mmlong(seq_len, fraction, rng=rng)
 
-    a, room = _check_df_return_answer(df)
-    while a is None:
-        df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
-        a, room = _check_df_return_answer(df)
+        def _check_df_return_answer(_df):
+            room_crowds = {r: 0 for r in rooms}
+            for _, row in _df.iterrows():
+                ur, urc = np.unique(row, return_counts=True)
+                for r in ur[urc >= n_crowd]:
+                    room_crowds[r] += 1
 
-    order_word = "maximal" if is_more else "minimal"
-    # Use frame + 1 because step_ids in the sequence are 1-based
-    q = f"Who was alone at time {frame + 1}? If there are several people alone, return the one with {order_word} lexicographic name."
-    
-    # Metadata: the queried frame (1-based), the room where char was
-    relevant_map = {frame + 1: [room]}
-    
-    return df, q, a, AnswerTypePerson, relevant_map
+            crowds = np.array(list(room_crowds.values()))
+            if crowds.size == 0 or np.sum(crowds == np.max(crowds)) > 1:
+                return None
+            return np.array(rooms)[crowds == np.max(crowds)].item()
+
+        a = _check_df_return_answer(df.iloc[frame_0 : frame_1 + 1])
+        if a is None:
+            continue
+
+        q = f"Which room was crowded ({n_crowd} or more people in one room) for the most steps{q_end}"
+        relevant_map: dict[int, list[str]] = {}
+        for step_id in range(frame_0 + 1, frame_1 + 2):
+            row = df.iloc[step_id - 1]
+            ur, urc = np.unique(row, return_counts=True)
+            if a in ur[urc >= n_crowd]:
+                relevant_map[step_id] = [a]
+        return q, a, AnswerTypeRoom, relevant_map
+    return None
+
+
+def room_empty_from_df(
+    df: pd.DataFrame,
+    seq_len: int,
+    chars: list[str],
+    rooms: list[str],
+    rng: random.Random,
+    fraction: float = 1.0,
+    max_tries: int = 100,
+) -> tuple[str, Any, str, dict[int, list[str]]] | None:
+    """Same semantics as q_room_empty but on a fixed DataFrame; None if no valid window."""
+    for _ in range(max_tries):
+        is_more, q_start, frame_0, frame_1, q_end = get_random_mmlong(
+            seq_len, fraction, superlative=False, rng=rng
+        )
+
+        def _check_df_return_answer(_df):
+            comp_fn = np.max if is_more else np.min
+            room_non_visits = {r: 0 for r in rooms}
+            for _, row in _df.iterrows():
+                empty_rooms = sorted(set(rooms) - set(row.unique().tolist()))
+                for r in empty_rooms:
+                    room_non_visits[r] += 1
+
+            empty_counts = np.array(list(room_non_visits.values()))
+            if np.sum(empty_counts == comp_fn(empty_counts)) > 1:
+                return None
+            return np.array(rooms)[empty_counts == comp_fn(empty_counts)].item()
+
+        a = _check_df_return_answer(df.iloc[frame_0 : frame_1 + 1])
+        if a is None:
+            continue
+
+        q = f"Which room was empty for {q_start} steps than the other rooms{q_end}"
+        relevant_map = {step_id: [a] for step_id in range(frame_0 + 1, frame_1 + 2)}
+        return q, a, AnswerTypeRoom, relevant_map
+    return None
 
 
 # ### DC questions: ###

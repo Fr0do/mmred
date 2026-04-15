@@ -28,6 +28,15 @@ class GenerationConfig:
         question_types: List of question types to include (None = all)
         rooms: List of room names
         chars: List of character names
+
+        Episode-bundle benchmarks (see ``mmred.qgen.bundles`` and
+        ``scripts/generate_bundle_dataset.py``) use a separate code path: each
+        episode has one shared sequence. By default ``bundle_size`` equals
+        ``seq_len`` (fixed-L bundles): ``k_target`` questions of the target type
+        at steps ``1..k_target``, plus ``bundle_size - k_target`` filler
+        questions on the same sequence. Set ``bundle_size`` explicitly only if
+        you need a different total number of questions per episode.
+
         target_keyframes: Control for relevant step count:
             - None: random (default behavior)
             - int: exact number of keyframes

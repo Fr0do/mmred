@@ -4,6 +4,7 @@ import json
 import multiprocessing as mp
 import os
 import re
+import sys
 from ast import literal_eval
 from functools import partial
 from typing import Optional, Set, Literal, Iterable
@@ -178,6 +179,88 @@ def strip_until_first_brace(string):
     return string[brace_start:]
 
 
+def _prepare_hits_dataframe(df_answers: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
+    """Normalize columns, parse predictions, add ``hit`` column (0/1 per row)."""
+    if "Answer" in df_answers.columns:
+        df_answers = df_answers.rename(
+            columns={
+                "Answer": "answer",
+                "N_steps": "seq_len",
+                "Type": "qtype",
+            }
+        )
+    df_answers = df_answers[
+        ~df_answers["Predicted_Answer"].str.lower().str.contains("error", na=True)
+    ]
+    if debug:
+        print(f"Using {df_answers.shape[0]} rows after filtering errors")
+    df_answers = df_answers.copy()
+    df_answers["Predicted_Answer"] = df_answers["Predicted_Answer"].apply(
+        strip_until_first_brace
+    )
+    df_answers["Final_Answer"] = [
+        parse_predicted_answer(x) for x in df_answers["Predicted_Answer"]
+    ]
+    df_answers["hit"] = df_answers.apply(validate_and_compare, axis=1).astype(int)
+    return df_answers
+
+
+def evaluate_bundle_inference_csv(
+    path: str,
+    *,
+    episode_column: str = "episode_id",
+    scoring: str = "strict",
+    min_correct: Optional[int] = None,
+    seq_len: Optional[int] = None,
+    k_target: Optional[int] = None,
+    debug: bool = False,
+) -> dict:
+    """
+    Sequence-level accuracy: fraction in [0, 1], mean over episodes of 1[episode passes threshold].
+
+    strict: episode passes iff all rows in the episode are correct.
+    at_least: episode passes iff sum(hits) >= min_correct.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    df_answers = pd.read_csv(path, sep=",", on_bad_lines="warn")
+    if episode_column not in df_answers.columns:
+        raise ValueError(
+            f"Column {episode_column!r} missing from {path}; need episode-bundle inference CSV."
+        )
+    df_answers = _prepare_hits_dataframe(df_answers, debug=debug)
+    if df_answers.empty:
+        return {
+            "seq_len": seq_len,
+            "k_target": k_target,
+            "accuracy": 0.0,
+            "n_episodes": 0,
+            "scoring": scoring,
+            "min_correct": min_correct if scoring == "at_least" else "",
+        }
+
+    episode_scores: list[float] = []
+    for _, g in df_answers.groupby(episode_column, sort=True):
+        n = len(g)
+        c = int(g["hit"].sum())
+        if scoring == "strict":
+            episode_scores.append(1.0 if c == n else 0.0)
+        else:
+            if min_correct is None:
+                raise ValueError("min_correct is required when scoring='at_least'")
+            episode_scores.append(1.0 if c >= min_correct else 0.0)
+
+    acc = (sum(episode_scores) / len(episode_scores)) if episode_scores else 0.0
+    return {
+        "seq_len": seq_len,
+        "k_target": k_target,
+        "accuracy": round(acc, 6),
+        "n_episodes": len(episode_scores),
+        "scoring": scoring,
+        "min_correct": min_correct if scoring == "at_least" else "",
+    }
+
+
 # Function to process a single model's data
 def process_model_data(path, debug=False):
     if not os.path.exists(path):
@@ -187,37 +270,11 @@ def process_model_data(path, debug=False):
         print(f"Processing {path} in process {os.getpid()}")
 
     try:
-        # Read CSV
         df_answers = pd.read_csv(path, sep=",", on_bad_lines="warn")
-        if "Answer" in df_answers.columns:
-            df_answers = df_answers.rename(
-                columns={
-                    "Answer": "answer",
-                    "N_steps": "seq_len",
-                    "Type": "qtype",
-                }
-            )
-
-        # Filter out rows with errors in the predicted answer
-        df_answers = df_answers[
-            ~df_answers["Predicted_Answer"].str.lower().str.contains("error", na=True)
-        ]
+        df_answers = _prepare_hits_dataframe(df_answers, debug=debug)
 
         if debug:
             print(f"Using {df_answers.shape[0]} answers for {path}")
-        df_answers["Predicted_Answer"] = df_answers["Predicted_Answer"].apply(
-            lambda x: strip_until_first_brace(x)
-        )
-
-        # Parse predicted answers
-        parsed_answers = [
-            parse_predicted_answer(row["Predicted_Answer"])
-            for _, row in df_answers.iterrows()
-        ]
-        df_answers["Final_Answer"] = parsed_answers
-
-        # Validate and compare answers
-        df_answers["hit"] = df_answers.apply(validate_and_compare, axis=1).astype(int)
 
         # Extract model name from the file path
         model_name = "/".join(path.split("answers_")[-1].split(".csv")[0].split("_", 1))
@@ -262,8 +319,76 @@ def main():
         default=None,
         help="Number of processes to use (default: number of CPU cores)",
     )
+    parser.add_argument(
+        "--bundle_scoring",
+        choices=["off", "strict", "at_least"],
+        default="off",
+        help="If not off, compute sequence-level accuracy grouped by episode_id.",
+    )
+    parser.add_argument(
+        "--bundle_min_correct",
+        type=int,
+        default=None,
+        help="With --bundle_scoring at_least, minimum correct answers per episode to pass.",
+    )
+    parser.add_argument(
+        "--bundle_episode_column",
+        type=str,
+        default="episode_id",
+        help="CSV column for grouping rows into one sequence score.",
+    )
+    parser.add_argument(
+        "--bundle_seq_len",
+        type=int,
+        default=None,
+        help="Recorded in bundle metrics output (metadata only).",
+    )
+    parser.add_argument(
+        "--bundle_k_target",
+        type=int,
+        default=None,
+        help="Recorded in bundle metrics output (metadata only).",
+    )
 
     args = parser.parse_args()
+
+    if args.bundle_scoring != "off":
+        if args.bundle_seq_len is None or args.bundle_k_target is None:
+            print(
+                "Error: --bundle_seq_len and --bundle_k_target are required when using bundle scoring.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if args.bundle_scoring == "at_least" and args.bundle_min_correct is None:
+            print(
+                "Error: --bundle_min_correct is required when --bundle_scoring at_least.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        answers = glob.glob(f"{args.input_dir}/{args.exp_name}/qa_pairs_answers_*.csv")
+        if len(answers) != 1:
+            print(
+                f"Error: bundle scoring expects exactly one qa_pairs_answers_*.csv, found {len(answers)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        metrics = evaluate_bundle_inference_csv(
+            answers[0],
+            episode_column=args.bundle_episode_column,
+            scoring=args.bundle_scoring,
+            min_correct=args.bundle_min_correct,
+            seq_len=args.bundle_seq_len,
+            k_target=args.bundle_k_target,
+            debug=args.debug,
+        )
+        os.makedirs(args.output_dir, exist_ok=True)
+        row = {**metrics, "exp_name": args.exp_name}
+        out_path = os.path.join(args.output_dir, f"{args.exp_name}_bundle_metrics.csv")
+        pd.DataFrame([row]).to_csv(out_path, index=False)
+        print(f"Bundle metrics -> {out_path}")
+        print(row)
+        return
 
     # Paths to answer files
     answers = glob.glob(f"{args.input_dir}/{args.exp_name}/qa_pairs_answers_*.csv")

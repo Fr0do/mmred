@@ -208,6 +208,11 @@ Available question types:
             print("Error: --split_total must be >= 0.", file=sys.stderr)
             sys.exit(1)
 
+        nq = args.n_questions if args.n_questions is not None else 1
+        if nq < 1:
+            print("Error: --n_questions must be >= 1.", file=sys.stderr)
+            sys.exit(1)
+
         base_out = Path(args.output_path)
         base_out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -215,6 +220,7 @@ Available question types:
         print(f"  Seed: {args.seed}")
         print(f"  Sequence lengths: {seq_lens}")
         print(f"  split_total: {split_total}")
+        print(f"  n_questions (multiplier): {nq}")
         print(f"  Target type: {args.target_question_type}")
         print(f"  All types: {args.question_types}")
         print(f"  Output pattern: {_split_output_path(base_out, 0, split_total)} ... "
@@ -228,10 +234,11 @@ Available question types:
                 k,
                 split_total,
             )
+            n_per_type = {t: c * nq for t, c in n_per_type.items()}
             config = GenerationConfig(
                 seed=args.seed,
                 seq_lengths=seq_lens,
-                n_questions=1,
+                n_questions=nq,
                 question_types=list(args.question_types),
                 n_questions_per_type=n_per_type,
             )
@@ -248,11 +255,16 @@ Available question types:
         print("Question-split complete.")
         return
 
+    nq = args.n_questions if args.n_questions is not None else 50
+    if nq < 1:
+        print("Error: --n_questions must be >= 1.", file=sys.stderr)
+        sys.exit(1)
+
     # Create configuration
     config = GenerationConfig(
         seed=args.seed,
         seq_lengths=args.seq_lengths or DEFAULT_SEQ_LENGTHS,
-        n_questions=args.n_questions,
+        n_questions=nq,
         question_types=args.question_types,
     )
 

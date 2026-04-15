@@ -9,6 +9,10 @@ import os
 import requests
 from io import BytesIO
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from PIL import Image
 from typing import List, Dict, Tuple, Union, Literal, Optional
 
@@ -159,6 +163,19 @@ def get_text_sequence(row: pd.Series, key: str, prefix_question: bool = False) -
     question = row["question"]
     return (question + "\n" + sequence_text) if prefix_question else (sequence_text + "\n" + question)
 
+
+_THINK_CLOSE_TAG = "</think>"
+
+
+def _join_thinking_for_csv(reasoning: str, content: str) -> str:
+    """Merge reasoning_content + content for CSV; wrap only if neither part already has thinking tags."""
+    r = reasoning or ""
+    c = content or ""
+    if _THINK_CLOSE_TAG in r or _THINK_CLOSE_TAG in c:
+        return r + c
+    return "<think>" + r + "</think>" + c
+
+
 async def process_row(
     row: pd.Series,
     data_path: Path,
@@ -179,7 +196,7 @@ async def process_row(
         row, in_context_examples, max_in_context, min(row['seq_len'], 16)
     )
     if use_text_input:
-        key = "sequence_json" if "sequence_json" in row else "sequence_description"
+        key = "sequence_json" if "sequence_json" in row else "sequence"
         user_text = get_text_sequence(row, key, prefix_question=prefix_question)
         if in_context_prompt:
             user_text = f"{in_context_prompt}\n\n{user_text}"
@@ -251,7 +268,7 @@ async def process_row(
                             model=model_name,
                             messages=messages,
                             temperature=0.6 if thinking else 0.0,
-                            max_completion_tokens=20000 if thinking else 50,
+                            max_completion_tokens=12000 if thinking else 50,
                             extra_body=extra_body,
                             **extra_kwargs,
                         ),
@@ -262,7 +279,7 @@ async def process_row(
                     if not thinking:
                         answer = reasoning + answer
                     else:
-                        answer = "<think>" + reasoning + "</think>" + answer
+                        answer = _join_thinking_for_csv(reasoning, answer)
                     return row_dict, answer
 
                 except asyncio.TimeoutError:
@@ -290,6 +307,7 @@ async def process_row(
                     else:
                         return row_dict, f"Error after {max_retries} retries: {str(e)}"
     else:
+        # Offline batch body only; assistant text for CSV is assembled on the live path (see _join_thinking_for_csv).
         offline_task = {
             "custom_id": f"text_{use_text_input}-qid-{row['qid']}",
             "method": "POST",
@@ -346,7 +364,8 @@ async def test_connection(
             )
             reasoning = getattr(response.choices[0].message, "reasoning_content", "") or ""
             answer = getattr(response.choices[0].message, "content", "") or ""
-            answer = "<think>" + reasoning + "</think>" + answer
+            # Probe uses enable_thinking=False; do not add thinking XML (would be empty blocks).
+            answer = (reasoning or "") + (answer or "")
             print(
                 f"Connection successful. Response: {answer}"
             )
