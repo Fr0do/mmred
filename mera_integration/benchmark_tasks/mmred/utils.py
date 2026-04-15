@@ -242,19 +242,38 @@ def weighted_length_aggregate(items: list[dict]) -> float:
     Returns:
         Weighted average score
     """
-    total_weight = 0
-    weighted_sum = 0
-    
+    from collections import defaultdict
+
+    # Group by task type
+    task_scores = defaultdict(lambda: {"weighted_sum": 0.0, "total_weight": 0.0})
+
     for item in items:
         score = item.get("em.dc_aggregate", 0)
-        
         seq_len = item.get("seq_len", 0)
-        weight = 2 ** (seq_len // 32)
-        
-        weighted_sum += score * weight
-        total_weight += weight
-    
-    return weighted_sum / total_weight if total_weight > 0 else 0.0
+        # Extract task type from metric keys
+        task = "unknown"
+        for k in item:
+            if k.startswith("em.") and k != "em.dc_aggregate" and ".len" not in k:
+                task = k.replace("em.", "")
+                break
+
+        weight = 2 ** (seq_len / 32)  # exponential: 2 for 32, 4 for 64, 16 for 128
+        task_scores[task]["weighted_sum"] += score * weight
+        task_scores[task]["total_weight"] += weight
+
+    # Per-task length-weighted averages
+    per_task = []
+    for s in task_scores.values():
+        if s["total_weight"] > 0:
+            per_task.append(s["weighted_sum"] / s["total_weight"])
+
+    if not per_task:
+        return 0.0
+
+    # Harmonic mean across task types (penalizes weakness on any task)
+    eps = 1e-6
+    n = len(per_task)
+    return n / sum(1.0 / (v + eps) for v in per_task)
 
 
 # ============================================================================
