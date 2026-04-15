@@ -1,6 +1,6 @@
 # MMReD: Dense Context Reasoning Benchmark
 
-MMReD (Multimodal Reasoning Evaluation Dataset) is a benchmark for evaluating long-context reasoning in vision-language models. This integration provides the **Dense Context (DC)** subset for the MERA leaderboard.
+MMReD (Multi-Modal Reasoning in Dense context) is a benchmark for evaluating long-context reasoning in vision-language models. This integration provides the **Dense Context (DC)** subset for the MERA leaderboard.
 
 ## Tasks
 

@@ -1,7 +1,7 @@
 # CLAUDE.md — MMReD / Long-VQA
 
 ## Project Identity
-**MMReD (Multimodal Reasoning Evaluation Dataset)**: A cross-modal benchmark for dense context reasoning in vision-language models. Evaluates long-context understanding where models must aggregate information across extended sequences.
+**MMReD (Multi-Modal Reasoning in Dense context)**: A cross-modal benchmark for dense context reasoning in vision-language models. Evaluates long-context understanding where models must aggregate information across extended sequences.
 
 Authors: Boris Shirokikh, Maxim Kurkin
 
