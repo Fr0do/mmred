@@ -3,7 +3,7 @@
 ## Project Identity
 **MMReD (Multi-Modal Reasoning in Dense context)**: A cross-modal benchmark for dense context reasoning in vision-language models. Evaluates long-context understanding where models must aggregate information across extended sequences.
 
-Authors: Boris Shirokikh, Maxim Kurkin
+Authors: Maxim Kurkin, Boris Shirokikh
 
 ## Repository Layout
 ```

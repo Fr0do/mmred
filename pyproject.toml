@@ -3,8 +3,8 @@ name = "mmred"
 version = "0.0.1"
 description = "A small utility package to create and work with the MMReD benchmark content."
 authors = [
-    { name = "Boris Shirokikh", email = "bg.dustpelt@gmail.com" },
     { name = "Maxim Kurkin", email = "maximbider@gmail.com" },
+    { name = "Boris Shirokikh", email = "bg.dustpelt@gmail.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.10"
