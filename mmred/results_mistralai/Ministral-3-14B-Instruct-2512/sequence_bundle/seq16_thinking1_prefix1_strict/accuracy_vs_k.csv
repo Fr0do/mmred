@@ -1,0 +1,17 @@
+seq_len,k,accuracy,scoring,min_correct,n_episodes
+16,1,0.81,strict,,100
+16,2,0.72,strict,,100
+16,3,0.77,strict,,100
+16,4,0.74,strict,,100
+16,5,0.73,strict,,100
+16,6,0.77,strict,,100
+16,7,0.78,strict,,100
+16,8,0.85,strict,,100
+16,9,0.76,strict,,100
+16,10,0.72,strict,,100
+16,11,0.767677,strict,,99
+16,12,0.71,strict,,100
+16,13,0.676768,strict,,99
+16,14,0.690722,strict,,97
+16,15,0.77,strict,,100
+16,16,0.789474,strict,,95
