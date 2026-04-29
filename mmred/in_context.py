@@ -22,6 +22,8 @@ def generate_in_context_examples(
     question_types: list[str] | None = None,
     seed: int = DEFAULT_SEED,
     overwrite: bool = True,
+    chars: list[str] | None = None,
+    rooms: list[str] | None = None,
 ) -> Path:
     """Generate a compact in-context dataset for few-shot prompts.
 
@@ -40,7 +42,10 @@ def generate_in_context_examples(
         Path to the generated file
     """
     from .config import DEFAULT_ROOMS, DEFAULT_CHARS
-    
+
+    chars = chars or DEFAULT_CHARS
+    rooms = rooms or DEFAULT_ROOMS
+
     output_path = Path(output_path)
     if output_path.exists() and not overwrite:
         return output_path
@@ -71,19 +76,19 @@ def generate_in_context_examples(
             seen_hashes = []
             for ex_idx in range(n_examples_per_task):
                 seq_df, question, answer, atype, relevant_map, seq_hash = _generate_single_question(
-                    question_fn, seq_len, seen_hashes, 
-                    DEFAULT_CHARS, DEFAULT_ROOMS, rng, **q_kwargs
+                    question_fn, seq_len, seen_hashes,
+                    chars, rooms, rng, **q_kwargs
                 )
                 seen_hashes.append(seq_hash)
                 
                 # Serialize sequence
-                sequence = serialize_sequence(seq_df, DEFAULT_ROOMS)
+                sequence = serialize_sequence(seq_df, rooms)
                 
                 # Create metadata
                 metadata = []
                 for step_id in range(1, seq_len + 1):
                     step_rooms = relevant_map.get(step_id, [])
-                    room_relevance = {room: room in step_rooms for room in DEFAULT_ROOMS}
+                    room_relevance = {room: room in step_rooms for room in rooms}
                     metadata.append(MetadataStep(step_id=step_id, rooms=room_relevance))
                 
                 examples.append({
