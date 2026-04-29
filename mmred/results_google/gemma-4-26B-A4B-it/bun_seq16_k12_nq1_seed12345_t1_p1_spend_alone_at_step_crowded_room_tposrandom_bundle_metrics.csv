@@ -1,0 +1,2 @@
+seq_len,k_target,accuracy,n_episodes,scoring,min_correct,exp_name
+16,12,1.0,1,strict,,bun_seq16_k12_nq1_seed12345_t1_p1_spend_alone_at_step_crowded_room_tposrandom
