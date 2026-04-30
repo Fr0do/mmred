@@ -1,0 +1,10 @@
+seq_len,k,accuracy,scoring,min_correct,n_episodes
+16,1,1.0,strict,,100
+16,2,0.97,strict,,100
+16,3,1.0,strict,,100
+16,4,0.99,strict,,100
+16,5,0.99,strict,,100
+16,6,0.99,strict,,100
+16,7,0.99,strict,,100
+16,8,1.0,strict,,100
+16,9,1.0,strict,,100
