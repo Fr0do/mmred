@@ -12,6 +12,12 @@ from mmred.config import DEFAULT_CHARS, DEFAULT_ROOMS
 from mmred.const import NOBODY, AnswerTypePerson
 from mmred.qgen.questions import q_spend_alone_at_time
 
+# Number of random questions to test per seq_len (multiple samples per sequence length)
+N_QUESTIONS_PER_LEN = 5
+
+# Sequence lengths to test (with n_questions samples each)
+SEQ_LENGTHS = [1, 2, 4, 8, 16, 32, 64, 128]
+
 
 def _alone_at_frame(df: pd.DataFrame, frame: int) -> set:
     """Return the set of person names who are alone (sole occupant of a room) at the given 0-based frame."""
@@ -73,14 +79,9 @@ def test_q_alone_question(seq_len: int, seed: int = None):
 
 
 if __name__ == "__main__":
-    test_q_alone_question(1)
-    test_q_alone_question(2)
-    test_q_alone_question(4)
-    test_q_alone_question(8)
-    test_q_alone_question(16)
-    test_q_alone_question(32)
-    test_q_alone_question(64)
-    test_q_alone_question(128)
-    # Reproducible run (optional)
+    for seq_len in SEQ_LENGTHS:
+        for i in range(N_QUESTIONS_PER_LEN):
+            test_q_alone_question(seq_len, seed=i)
+    # Reproducible run (fixed-seed sanity check)
     test_q_alone_question(4, seed=42)
     print("All assertions passed.")

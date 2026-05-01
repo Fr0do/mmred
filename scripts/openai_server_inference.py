@@ -164,16 +164,260 @@ def get_text_sequence(row: pd.Series, key: str, prefix_question: bool = False) -
     return (question + "\n" + sequence_text) if prefix_question else (sequence_text + "\n" + question)
 
 
-_THINK_CLOSE_TAG = "</think>"
+_THINK_CLOSE_TAGS = ("</think>", "[/THINK]", "<channel|>")
+
+
+def _is_gemma4_model(model_name: str) -> bool:
+    m = (model_name or "").lower()
+    return "gemma-4" in m or "gemma_4" in m or "gemma4" in m
+
+
+_GEMMA4_CHANNEL_START = "<|channel>"
+_GEMMA4_CHANNEL_END = "<channel|>"
+_GEMMA4_THOUGHT_LABEL = "thought\n"
+
+
+def _strip_gemma4_thought_label(text: str) -> str:
+    """Strip Gemma-4 ``thought\\n`` role label after optional ``<|channel>`` (vLLM Gemma4ReasoningParser)."""
+    if text.startswith(_GEMMA4_THOUGHT_LABEL):
+        return text[len(_GEMMA4_THOUGHT_LABEL) :]
+    return text
+
+
+def _join_gemma4_reasoning_for_csv(reasoning: str, content: str) -> str:
+    """Merge reasoning + answer for CSV using Gemma-4 ``<|channel>`` ... ``<channel|>`` markers."""
+    r = reasoning or ""
+    c = content or ""
+    if _GEMMA4_CHANNEL_END in (r + c):
+        return r + c
+    body = r
+    if body.startswith(_GEMMA4_CHANNEL_START):
+        body = body[len(_GEMMA4_CHANNEL_START) :]
+    body = _strip_gemma4_thought_label(body)
+    if not body.strip():
+        return _join_thinking_for_csv("", c)
+    return (
+        _GEMMA4_CHANNEL_START
+        + _GEMMA4_THOUGHT_LABEL
+        + body
+        + _GEMMA4_CHANNEL_END
+        + c
+    )
 
 
 def _join_thinking_for_csv(reasoning: str, content: str) -> str:
-    """Merge reasoning_content + content for CSV; wrap only if neither part already has thinking tags."""
+    """Merge reasoning_content + content for CSV; wrap only if neither part already has a known close tag."""
     r = reasoning or ""
     c = content or ""
-    if _THINK_CLOSE_TAG in r or _THINK_CLOSE_TAG in c:
+    if any(tag in r for tag in _THINK_CLOSE_TAGS) or any(tag in c for tag in _THINK_CLOSE_TAGS):
         return r + c
     return "<think>" + r + "</think>" + c
+
+
+_MINISTRAL_THINK_CLOSE = "[/THINK]"
+
+
+def _mistral_completion_to_answer(text: str, thinking: bool) -> str:
+    """Align ``/v1/completions`` output with chat assembly (``reasoning_content`` + ``content`` / ``_join_thinking_for_csv``)."""
+    t = (text or "").strip()
+    if not thinking:
+        return t
+    idx = t.rfind(_MINISTRAL_THINK_CLOSE)
+    if idx == -1:
+        return t
+    reasoning_part = t[: idx + len(_MINISTRAL_THINK_CLOSE)]
+    content_part = t[idx + len(_MINISTRAL_THINK_CLOSE) :].lstrip()
+    return _join_thinking_for_csv(reasoning_part, content_part)
+
+
+# Mirrors `default_system_message` in mistralai/Ministral-3-8B-Reasoning-2512 `chat_template.jinja`.
+MINISTRAL_DEFAULT_SYSTEM_MESSAGE = (
+    "# HOW YOU SHOULD THINK AND ANSWER\n\n"
+    "First draft your thinking process (inner monologue) until you arrive at a response. "
+    "Format your response using Markdown, and use LaTeX for any mathematical equations. "
+    "Write both your thoughts and the response in the same language as the input.\n\n"
+    "Your thinking process must follow the template below:"
+    "[THINK]Your thoughts or/and draft, like working through an exercise on scratch paper. "
+    "Be as casual and as long as you want until you are confident to generate the response to the user.[/THINK]"
+    "Here, provide a self-contained response."
+) # TODO: dont use currently
+
+
+def _ministral_content_is_empty(content) -> bool:
+    if content is None:
+        return True
+    if isinstance(content, str):
+        return content.strip() == ""
+    if isinstance(content, list):
+        if not content:
+            return True
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            t = block.get("type")
+            if t == "text" and str(block.get("text", "")).strip():
+                return False
+            if t == "thinking" and str(block.get("thinking", "")).strip():
+                return False
+            if t in ("image", "image_url"):
+                return False
+        return True
+    return False
+
+
+def _ministral_format_system_inner(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            t = block.get("type")
+            if t == "text":
+                parts.append(str(block.get("text", "")))
+            elif t == "thinking":
+                parts.append("[THINK]" + str(block.get("thinking", "")) + "[/THINK]")
+            else:
+                raise ValueError(
+                    "Only text and thinking chunks are supported in system message contents."
+                )
+        return "".join(parts)
+    raise TypeError("System content must be a string or a list of chunks.")
+
+
+def _ministral_format_user_inst(content) -> str:
+    if isinstance(content, str):
+        return "[INST]" + content + "[/INST]"
+    if not isinstance(content, list) or not content:
+        raise ValueError("User message must have a string or a non-empty list of chunks in content.")
+    blocks = sorted(content, key=lambda b: str(b.get("type", ""))) if len(content) == 2 else content
+    inner: list[str] = []
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        t = block.get("type")
+        if t == "text":
+            inner.append(str(block.get("text", "")))
+        elif t in ("image", "image_url"):
+            inner.append("[IMG]")
+        else:
+            raise ValueError(
+                "Only text, image and image_url chunks are supported in user message content."
+            )
+    return "[INST]" + "".join(inner) + "[/INST]"
+
+
+def _ministral_format_assistant_turn(message: dict, eos_token: str) -> str:
+    parts: list[str] = []
+    content = message.get("content")
+    tool_calls = message.get("tool_calls") or []
+    if _ministral_content_is_empty(content) and not tool_calls:
+        raise ValueError(
+            "Assistant message must have a string or a list of chunks in content or a list of tool calls."
+        )
+    if isinstance(content, str) and content != "":
+        parts.append(content)
+    elif isinstance(content, list) and len(content) > 0:
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            t = block.get("type")
+            if t == "text":
+                parts.append(str(block.get("text", "")))
+            elif t == "thinking":
+                parts.append("[THINK]" + str(block.get("thinking", "")) + "[/THINK]")
+            else:
+                raise ValueError(
+                    "Only text and thinking chunks are supported in assistant message contents."
+                )
+    for tool in tool_calls:
+        fn = tool.get("function") or {}
+        name = fn.get("name", "")
+        arguments = fn.get("arguments", "")
+        if not isinstance(arguments, str):
+            arguments = json.dumps(arguments, ensure_ascii=False)
+        elif arguments == "":
+            arguments = "{}"
+        parts.append("[TOOL_CALLS]" + name + "[ARGS]" + arguments)
+    parts.append(eos_token)
+    return "".join(parts)
+
+
+def _ministral_assert_alternating(loop_messages: list[dict]) -> None:
+    """Same role-alternation check as in Ministral `chat_template.jinja` (user / assistant without tool_calls)."""
+    ns_index = 0
+    for message in loop_messages:
+        role = message.get("role")
+        tcalls = message.get("tool_calls")
+        has_tc = bool(tcalls and len(tcalls) > 0)
+        if role == "user" or (role == "assistant" and not has_tc):
+            if (role == "user") != (ns_index % 2 == 0):
+                raise ValueError(
+                    "After the optional system message, conversation roles must alternate user and assistant "
+                    "roles except for tool calls and results."
+                )
+            ns_index += 1
+
+
+def _messages_to_plain_prompt(
+    messages: list[dict],
+    tools: Optional[list] = None,
+) -> str:
+    """
+    Build a string prompt for ``/v1/completions`` matching ``chat_template.jinja`` from
+    ``mistralai/Ministral-3-8B-Reasoning-2512`` (BOS, ``[SYSTEM_PROMPT]``, ``[INST]``, tool blocks, EOS after
+    assistant turns). Used when vLLM cannot apply chat templates (e.g. Mistral-family tokenizers).
+
+    Optional env: ``MISTRAL_PLAIN_BOS_TOKEN``, ``MISTRAL_PLAIN_EOS_TOKEN`` — set to tokenizer
+    ``bos_token`` / ``eos_token`` if the server does not add them when encoding the prompt string.
+
+    Leading ``system`` messages with empty content are dropped so the template's
+    ``default_system_message`` branch applies (Jinja only injects it when the first message is not ``system``).
+    """
+    if not messages:
+        return ""
+
+    msgs = list(messages)
+    while msgs and msgs[0].get("role") == "system" and _ministral_content_is_empty(msgs[0].get("content")):
+        msgs = msgs[1:]
+
+    bos_token = os.environ.get("MISTRAL_PLAIN_BOS_TOKEN", "")
+    eos_token = os.environ.get("MISTRAL_PLAIN_EOS_TOKEN", "")
+
+    out: list[str] = [bos_token]
+
+    if msgs and msgs[0].get("role") == "system":
+        out.append("[SYSTEM_PROMPT]")
+        out.append(_ministral_format_system_inner(msgs[0]["content"]))
+        out.append("[/SYSTEM_PROMPT]")
+        loop_messages = msgs[1:]
+    else:
+        loop_messages = msgs
+        if MINISTRAL_DEFAULT_SYSTEM_MESSAGE:
+            out.append("[SYSTEM_PROMPT]")
+            out.append(SYSTEM_PROMPT)
+            out.append("[/SYSTEM_PROMPT]")
+
+    if tools:
+        out.append("[AVAILABLE_TOOLS]")
+        out.append(json.dumps(tools, ensure_ascii=False))
+        out.append("[/AVAILABLE_TOOLS]")
+
+    _ministral_assert_alternating(loop_messages)
+
+    for message in loop_messages:
+        role = message.get("role")
+        if role == "user":
+            out.append(_ministral_format_user_inst(message.get("content")))
+        elif role == "assistant":
+            out.append(_ministral_format_assistant_turn(message, eos_token))
+        elif role == "tool":
+            out.append("[TOOL_RESULTS]" + str(message.get("content", "")) + "[/TOOL_RESULTS]")
+        else:
+            raise ValueError(f"Only user, assistant and tool roles are supported, got {role!r}.")
+
+    return "".join(out)
 
 
 async def process_row(
@@ -190,6 +434,8 @@ async def process_row(
     for_offline: bool = False,
     in_context_examples: Optional[List[Dict]] = None,
     max_in_context: int = 0,
+    force_completions: bool = False,
+    max_completion_tokens: int = 12000,
 ) -> Tuple[Dict, str]:
     # Prepare the content based on input type
     in_context_prompt = build_in_context_prompt(
@@ -236,7 +482,10 @@ async def process_row(
         # "min_p": 0.05,
         "top_k": 20,
         "chat_template_kwargs": {"enable_thinking": thinking},
+        "skip_special_tokens": False,
     }
+    completion_cap = max_completion_tokens if thinking else 50
+
     if not for_offline:
         # Prepare extra body parameters
         if row.get("atype") in schemas and not thinking:
@@ -263,12 +512,26 @@ async def process_row(
             retry_count = 0
             while retry_count <= max_retries:
                 try:
+                    if "mistral" in (model_name or "").lower():
+                        prompt = _messages_to_plain_prompt(messages)
+                        resp2 = await asyncio.wait_for(
+                            client.completions.create(
+                                model=model_name,
+                                prompt=prompt,
+                                temperature=0.6 if thinking else 0.0,
+                                max_tokens=completion_cap,
+                            ),
+                            timeout=timeout,
+                        )
+                        text = (getattr(resp2.choices[0], "text", "") or "").strip()
+                        return row_dict, _mistral_completion_to_answer(text, thinking)
+
                     response = await asyncio.wait_for(
                         client.chat.completions.create(
                             model=model_name,
                             messages=messages,
                             temperature=0.6 if thinking else 0.0,
-                            max_completion_tokens=12000 if thinking else 50,
+                            max_completion_tokens=completion_cap,
                             extra_body=extra_body,
                             **extra_kwargs,
                         ),
@@ -279,7 +542,11 @@ async def process_row(
                     if not thinking:
                         answer = reasoning + answer
                     else:
-                        answer = _join_thinking_for_csv(reasoning, answer)
+                        answer = (
+                            _join_gemma4_reasoning_for_csv(reasoning, answer)
+                            if _is_gemma4_model(model_name)
+                            else _join_thinking_for_csv(reasoning, answer)
+                        )
                     return row_dict, answer
 
                 except asyncio.TimeoutError:
@@ -316,7 +583,7 @@ async def process_row(
                 "model": model_name,
                 "messages": messages,
                 "temperature": 0.6 if thinking else 0.0,
-                "max_completion_tokens": 16384 if thinking else 50,
+                "max_completion_tokens": max_completion_tokens if thinking else 50,
                 "response_format": {
                     "type": "json_schema",
                     "json_schema": strict_schemas[row["atype"]],
@@ -331,6 +598,7 @@ async def test_connection(
     model_name: str,
     max_retries: int = 3,
     backoff_factor: float = 1.5,
+    force_completions: bool = False,
 ):
     """Test the API connection and model availability with retries and backoff."""
     dummy_messages = [
@@ -355,15 +623,26 @@ async def test_connection(
             print(
                 f"Testing connection to model {model_name}... (attempt {retry_count+1})"
             )
-            response = await client.chat.completions.create(
-                model=model_name,
-                messages=dummy_messages,
-                max_completion_tokens=25,
-                timeout=30,
-                extra_body=extra_body,
-            )
-            reasoning = getattr(response.choices[0].message, "reasoning_content", "") or ""
-            answer = getattr(response.choices[0].message, "content", "") or ""
+            if "mistral" in (model_name or "").lower():
+                prompt = _messages_to_plain_prompt(dummy_messages)
+                response = await client.completions.create(
+                    model=model_name,
+                    prompt=prompt,
+                    max_tokens=25,
+                    timeout=30,
+                )
+                reasoning = ""
+                answer = getattr(response.choices[0], "text", "") or ""
+            else:
+                response = await client.chat.completions.create(
+                    model=model_name,
+                    messages=dummy_messages,
+                    max_completion_tokens=25,
+                    timeout=30,
+                    extra_body=extra_body,
+                )
+                reasoning = getattr(response.choices[0].message, "reasoning_content", "") or ""
+                answer = getattr(response.choices[0].message, "content", "") or ""
             # Probe uses enable_thinking=False; do not add thinking XML (would be empty blocks).
             answer = (reasoning or "") + (answer or "")
             print(
@@ -397,6 +676,8 @@ async def process_dataset(
     prefix_question: bool = False,
     in_context_examples: Optional[List[Dict]] = None,
     max_in_context: int = 0,
+    force_completions: bool = False,
+    max_completion_tokens: int = 12000,
 ):
 
     semaphore = asyncio.Semaphore(semaphore_limit)
@@ -412,7 +693,9 @@ async def process_dataset(
     # Generate a unique position for the progress bar based on client base URL using SHA-256
     # This ensures parallel scripts don't have overlapping progress bars
     base_url_str = str(client.base_url)
-    hash_url_str = base_url_str + str(data_path) + str(thinking)
+    hash_url_str = (
+        base_url_str + str(data_path) + str(thinking) + str(max_completion_tokens)
+    )
     sha256_hash = hashlib.sha256(hash_url_str.encode()).hexdigest()
     position = int(sha256_hash, 16) % 16
 
@@ -440,6 +723,8 @@ async def process_dataset(
                     False,
                     in_context_examples,
                     max_in_context,
+                    force_completions,
+                    max_completion_tokens,
                 )
             )
             tasks.append(task)
@@ -487,6 +772,8 @@ async def create_task_batch(
     prefix_question: bool = False,
     in_context_examples: Optional[List[Dict]] = None,
     max_in_context: int = 0,
+    force_completions: bool = False,
+    max_completion_tokens: int = 12000,
 ):
     tasks = []
     semaphore = asyncio.Semaphore(semaphore_limit)
@@ -507,6 +794,8 @@ async def create_task_batch(
                 for_offline,
                 in_context_examples,
                 max_in_context,
+                force_completions,
+                max_completion_tokens,
             )
         )
         tasks.append(task)
@@ -588,15 +877,33 @@ async def main_async(args):
     use_text_input = args.text_json_path is not None
     if "output_csv" not in args:
         model_format = "_".join(model_name.split("/"))
+        cap = int(getattr(args, "max_completion_tokens", 12000))
+        mt_part = (
+            f"_mt{cap}"
+            if getattr(args, "thinking", False) and cap != 12000
+            else ""
+        )
         args.output_csv = os.path.join(
-            "data_cache", args.exp_name, f"qa_pairs_answers_{model_format}_text_{use_text_input}_thinking_{args.thinking}_prefix_q_{args.prefix_question}.csv"
+            "data_cache",
+            args.exp_name,
+            f"qa_pairs_answers_{model_format}_text_{use_text_input}_thinking_{args.thinking}{mt_part}_prefix_q_{args.prefix_question}.csv",
         )
 
     # Create directory if it doesn't exist
     os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
     if not args.offline:
+        force_compl_env = os.getenv("FORCE_COMPLETIONS", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "y",
+        )
+        force_completions = bool(getattr(args, "force_completions", False) or force_compl_env)
+
         # Test connection before proceeding
-        connection_ok = await test_connection(client, model_name)
+        connection_ok = await test_connection(
+            client, model_name, force_completions=force_completions
+        )
         if not connection_ok:
             print("Connection test failed")
             return
@@ -633,6 +940,8 @@ async def main_async(args):
     ].reset_index()
     print(f"QA pairs remaining to process: {len(remaining_dataset)}")
     print(f"Model type thinking: {args.thinking}")
+    if args.thinking:
+        print(f"max_completion_tokens (thinking cap): {args.max_completion_tokens}")
 
     # Process remaining QA pairs
     if len(remaining_dataset) > 0:
@@ -650,6 +959,8 @@ async def main_async(args):
                 args.prefix_question,
                 in_context_examples,
                 args.in_context_examples,
+                force_completions,
+                args.max_completion_tokens,
             )
         else:
             print(f"Writing output to {args.output_csv}")
@@ -668,6 +979,8 @@ async def main_async(args):
                 args.prefix_question,
                 in_context_examples,
                 args.in_context_examples,
+                force_completions,
+                args.max_completion_tokens,
             )
             print(
                 f"Processing complete. Answers have been written to {args.output_csv}"
@@ -727,7 +1040,20 @@ def main():
         help="Force processing even if connection test fails",
     )
     parser.add_argument(
+        "--force_completions",
+        action="store_true",
+        default=False,
+        help="Bypass /v1/chat/completions for Mistral-family models; use /v1/completions with a plain prompt (also FORCE_COMPLETIONS=1).",
+    )
+    parser.add_argument(
         "--thinking", action="store_true", default=False, help="If model is a thinker"
+    )
+    parser.add_argument(
+        "--max_completion_tokens",
+        type=int,
+        default=12000,
+        help="When --thinking: max_completion_tokens (chat) / max_tokens (Mistral completions). "
+        "When not thinking, generation still uses a short cap (50). Default filename includes _mt<N> only if thinking and N != 12000.",
     )
     parser.add_argument(
         "--prefix_question", action="store_true", default=False, help="If question is a prefix of sequence"

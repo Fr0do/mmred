@@ -9,7 +9,7 @@ set -euo pipefail
 DATASET_JSON="${DATASET_JSON:-data/custom_dataset.json}"
 EXP_NAME="${EXP_NAME:-qwen3_instruct_4b}"
 
-SEQ_LENGTHS="${SEQ_LENGTHS:-16 32 64 128 256 512}"
+SEQ_LENGTHS="${SEQ_LENGTHS:-16 32 64 128 256}"
 QUESTION_TYPES="${QUESTION_TYPES:-spend_alone_at_step}"
 N_QUESTIONS="${N_QUESTIONS:-1200}"
 SEED="${SEED:-12345}"

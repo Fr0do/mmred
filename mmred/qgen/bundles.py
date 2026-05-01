@@ -39,6 +39,24 @@ def _distribute_remainder_across_types(remainder: int, other_types: list[str]) -
     return {t: base + (1 if i < extra else 0) for i, t in enumerate(other_types)}
 
 
+def select_target_frames(
+    seq_len: int,
+    k_target: int,
+    target_step_strategy: str,
+    rng: random.Random,
+) -> list[int]:
+    """Select zero-indexed frames for target questions."""
+    if k_target < 0 or k_target > seq_len:
+        raise ValueError("k_target must be in [0, seq_len]")
+    if target_step_strategy == "prefix":
+        return list(range(k_target))
+    if target_step_strategy == "random":
+        return sorted(rng.sample(range(seq_len), k_target))
+    raise ValueError(
+        f"Unknown target_step_strategy {target_step_strategy!r}; expected 'prefix' or 'random'"
+    )
+
+
 def _sample_to_dict(
     *,
     seq_len: int,
@@ -85,6 +103,8 @@ def try_build_episode_bundle(
     chars: list[str] | None = None,
     rooms: list[str] | None = None,
     max_episode_tries: int = 200,
+    target_step_strategy: str = "prefix",
+    target_rng: random.Random | None = None,
 ) -> list[dict[str, Any]] | None:
     """Build one episode: *bundle_size* questions on the same sequence (k target + fillers)."""
     chars = chars or list(DEFAULT_CHARS)
@@ -100,6 +120,9 @@ def try_build_episode_bundle(
         raise ValueError("k_target cannot exceed seq_len for spend_alone_at_step (one question per step index)")
     if bundle_size < 1:
         raise ValueError("bundle_size must be >= 1")
+    target_frames = select_target_frames(
+        seq_len, k_target, target_step_strategy, target_rng or rng
+    )
 
     n_filler = bundle_size - k_target
     per_filler = _distribute_remainder_across_types(n_filler, others) if n_filler > 0 else {}
@@ -115,8 +138,7 @@ def try_build_episode_bundle(
         slot = 0
         ok = True
 
-        for i in range(k_target):
-            frame = i
+        for frame in target_frames:
             is_more = rng.choice([True, False])
             q, a, atype, rm = spend_alone_at_time_from_df(df, frame, is_more, chars, rooms)
             rows.append(
@@ -183,16 +205,18 @@ def generate_bundle_dataset(
     seed: int,
     chars: list[str] | None = None,
     rooms: list[str] | None = None,
+    target_step_strategy: str = "prefix",
 ) -> list[dict[str, Any]]:
     """
     Generate *n_episodes* episodes. Each episode has ``bundle_size`` questions on one sequence.
 
-    ``bundle_size`` defaults to ``seq_len`` (fixed-L bundle: k targets at steps 1..k plus fillers).
+    ``bundle_size`` defaults to ``seq_len`` (fixed-L bundle: k target steps plus fillers).
     """
     resolved_bundle = bundle_size if bundle_size is not None else seq_len
     all_rows: list[dict[str, Any]] = []
     for ep in range(n_episodes):
         rng = random.Random(seed + ep * 1_000_003 + k_target * 17)
+        target_rng = random.Random(seed + ep * 1_000_003 + k_target * 17 + 97_531)
         eid = f"{ep:05d}"
         bundle = try_build_episode_bundle(
             seq_len=seq_len,
@@ -204,6 +228,8 @@ def generate_bundle_dataset(
             rng=rng,
             chars=chars,
             rooms=rooms,
+            target_step_strategy=target_step_strategy,
+            target_rng=target_rng,
         )
         if bundle is None:
             raise RuntimeError(

@@ -3,8 +3,8 @@
 
 Each episode uses one shared sequence of length ``seq_len``. Every episode has
 ``bundle_size`` questions (default ``bundle_size == seq_len``): ``k_target``
-questions of type ``spend_alone_at_step`` at steps 1..k_target, plus filler
-questions of other types on the same sequence.
+questions of type ``spend_alone_at_step`` at selected target steps, plus
+filler questions of other types on the same sequence.
 
 Filler types must have fixed-sequence generators in ``mmred.qgen.bundles``:
 ``crowded_room``, ``room_empty``.
@@ -38,9 +38,23 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Generate MMReD episode-bundle JSON.")
     p.add_argument("--output_path", type=str, required=True)
     p.add_argument("--seq_len", type=int, required=True)
-    p.add_argument("--k_target", type=int, required=True, help="Target questions at steps 1..k_target.")
+    p.add_argument(
+        "--k_target",
+        type=int,
+        required=True,
+        help="Number of target questions / target time steps.",
+    )
     p.add_argument("--n_episodes", type=int, default=1200)
     p.add_argument("--target_question_type", type=str, default="spend_alone_at_step")
+    p.add_argument(
+        "--target_step_strategy",
+        choices=("prefix", "random"),
+        default="prefix",
+        help=(
+            "How to choose target time steps. 'prefix' uses steps 1..k_target "
+            "(baseline); 'random' samples k_target distinct steps uniformly per episode."
+        ),
+    )
     p.add_argument(
         "--question_types",
         type=str,
@@ -84,13 +98,17 @@ def main() -> None:
         target_question_type=args.target_question_type,
         question_types=list(args.question_types),
         seed=args.seed,
+        target_step_strategy=args.target_step_strategy,
     )
 
     out = Path(args.output_path)
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump(samples, f, indent=2)
-    print(f"Wrote {len(samples)} rows ({args.n_episodes} episodes) -> {out}")
+    print(
+        f"Wrote {len(samples)} rows ({args.n_episodes} episodes, "
+        f"target_step_strategy={args.target_step_strategy}) -> {out}"
+    )
 
 
 if __name__ == "__main__":

@@ -158,24 +158,49 @@ def parse_predicted_answer(predicted_answer):
         return match[0] if match else "None"
 
 
+_THINK_CLOSE_TAGS = ("</think>", "[/THINK]", "<channel|>")
+
+
+def _json_object_tail(s: str) -> str:
+    """If no thinking close tag: take substring from last plausible JSON object start."""
+    marker = '{"answer"'
+    idx = s.rfind(marker)
+    if idx != -1:
+        return s[idx:].strip()
+    brace = s.rfind("{")
+    if brace != -1:
+        return s[brace:].strip()
+    return s
+
+
 def strip_until_first_brace(string):
-    # Find the position of "</think>"
-    think_end = string.find("</think>")
+    """Strip everything up to the last thinking close tag, then return the JSON tail starting at '{'.
 
-    # If "</think>" is not found, return the original string
-    if think_end == -1:
+    Supported close markers: ``</think>``, ``[/THINK]``, and Gemma-4 ``<channel|>``.
+
+    If there is no thinking close tag, fall back to the tail from the last ``{"answer"`` (else last ``{``),
+    so long CoT + trailing JSON (e.g. untagged Ministral completions) still parses.
+    """
+    if not isinstance(string, str):
         return string
-    else:
-        string = string[think_end:]
-    string = string.replace("</answer>", "").replace("<answer>", "").strip()
-    # Find the position of the first "{" after "</think>"
-    brace_start = string.find("{", think_end)
 
-    # If "{" is not found after "</think>", return the original string
+    # Find the last occurrence among supported thinking close tags.
+    best_end = -1
+    best_tag = None
+    for tag in _THINK_CLOSE_TAGS:
+        pos = string.rfind(tag)
+        if pos > best_end:
+            best_end = pos
+            best_tag = tag
+    if best_end == -1 or best_tag is None:
+        return _json_object_tail(string)
+
+    string = string[best_end + len(best_tag) :]
+    string = string.replace("</answer>", "").replace("<answer>", "").strip()
+
+    brace_start = string.find("{")
     if brace_start == -1:
         return string
-
-    # Return the substring starting from the first "{"
     return string[brace_start:]
 
 

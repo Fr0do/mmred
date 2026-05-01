@@ -17,13 +17,16 @@
 #   REWRITE_DATA_CACHE, PLOT_ACCURACY_PNG, SEMAPHORE_LIMIT, BATCH_SIZE
 #   PREFIX_QUESTION, THINKING (included in exp_name and in
 #     \$RESULTS_DIR/sequence_bundle/seq\${SEQ_LEN}_thinking\${THINKING}_prefix\${PREFIX_QUESTION}_<scoring>/)
+#   TARGET_STEP_STRATEGY=prefix|random (target question time-step placement; included in output names)
+#   MAX_COMPLETION_TOKENS (default 12000): when THINKING=1, passed to openai_server_inference as
+#     --max_completion_tokens. If not 12000, exp_name and SEQUENCE_BUNDLE_OUT get suffix _mt\$MAX_COMPLETION_TOKENS.
 #
 # vLLM: start your server separately (e.g. edit and run vllm_servers.sh), or set
 #   AUTOSTART_VLLM=1 VLLM_GPU=0  for a minimal single-GPU text serve (requires vllm CLI).
 #
 set -euo pipefail
 
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-1.7B}"
 VLLM_PORT="${VLLM_PORT:-8003}"
 INPUT_DIR="${INPUT_DIR:-data_cache/${MODEL_NAME}}"
 RESULTS_DIR="${RESULTS_DIR:-mmred/results_${MODEL_NAME}}"
@@ -50,12 +53,16 @@ SEMAPHORE_LIMIT="${SEMAPHORE_LIMIT:-32}"
 BATCH_SIZE="${BATCH_SIZE:-256}"
 PREFIX_QUESTION="${PREFIX_QUESTION:-1}"
 THINKING="${THINKING:-1}"
+TARGET_STEP_STRATEGY="${TARGET_STEP_STRATEGY:-random}"
+MAX_COMPLETION_TOKENS="${MAX_COMPLETION_TOKENS:-12000}"
 
 DRY_RUN=0
 
 run() {
   echo "+ $*"
-  [[ "$DRY_RUN" -eq 0 ]] && eval "$@"
+  if [[ "$DRY_RUN" -eq 0 ]]; then
+    eval "$@"
+  fi
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,6 +83,8 @@ echo "=== Sequence bundle benchmark ==="
 echo "MODEL_NAME=$MODEL_NAME SEQ_LEN=$SEQ_LEN N_EPISODES=$N_EPISODES"
 echo "K_START=$K_START K_END=$K_END BUNDLE_SCORING=$BUNDLE_SCORING"
 echo "THINKING=$THINKING PREFIX_QUESTION=$PREFIX_QUESTION"
+echo "TARGET_STEP_STRATEGY=$TARGET_STEP_STRATEGY"
+echo "MAX_COMPLETION_TOKENS=$MAX_COMPLETION_TOKENS"
 echo "QUESTION_TYPES=$QUESTION_TYPES TARGET=$TARGET_QUESTION_TYPE"
 echo
 
@@ -107,13 +116,23 @@ _tf=""
 [[ "$PREFIX_QUESTION" -eq 1 ]] && _pf="--prefix_question"
 [[ "$THINKING" -eq 1 ]] && _tf="--thinking"
 
+_mt_tag=""
+if [[ "$THINKING" -eq 1 && "${MAX_COMPLETION_TOKENS}" != "12000" ]]; then
+  _mt_tag="_mt${MAX_COMPLETION_TOKENS}"
+fi
+_mt_arg=""
+if [[ "$THINKING" -eq 1 ]]; then
+  _mt_arg="--max_completion_tokens ${MAX_COMPLETION_TOKENS}"
+fi
+_tpos_tag="_tpos${TARGET_STEP_STRATEGY}"
+
 # Disambiguate aggregate CSV/PNG from THINKING, PREFIX_QUESTION, and scoring mode.
 # exp_name already includes t*/p* per run; generated JSON does not depend on inference flags.
 _score_tag="${BUNDLE_SCORING}"
 if [[ "$BUNDLE_SCORING" == "at_least" && -n "${BUNDLE_MIN_CORRECT:-}" ]]; then
   _score_tag="at_least_mc${BUNDLE_MIN_CORRECT}"
 fi
-SEQUENCE_BUNDLE_OUT="${RESULTS_DIR}/sequence_bundle/seq${SEQ_LEN}_thinking${THINKING}_prefix${PREFIX_QUESTION}_${_score_tag}"
+SEQUENCE_BUNDLE_OUT="${RESULTS_DIR}/sequence_bundle/seq${SEQ_LEN}_thinking${THINKING}_prefix${PREFIX_QUESTION}_${_score_tag}${_tpos_tag}${_mt_tag}"
 mkdir -p "$SEQUENCE_BUNDLE_OUT"
 
 SUMMARY_CSV="${SEQUENCE_BUNDLE_OUT}/accuracy_vs_k.csv"
@@ -174,8 +193,8 @@ PLOTEOF
 for k in $(seq "$K_START" "$K_END"); do
   echo "================ k_target=$k / seq_len=$SEQ_LEN ================"
 
-  GEN_JSON="${INPUT_DIR}/generated_bundles/$MODEL_NAME/seq${SEQ_LEN}/bundle_${_qt_tag}_nq${N_EPISODES}_k${k}_seed${SEED}.json"
-  exp_name="bun_seq${SEQ_LEN}_k${k}_nq${N_EPISODES}_seed${SEED}_t${THINKING}_p${PREFIX_QUESTION}_${_qt_tag}"
+  GEN_JSON="${INPUT_DIR}/generated_bundles/$MODEL_NAME/seq${SEQ_LEN}/bundle_${_qt_tag}_nq${N_EPISODES}_k${k}_seed${SEED}${_tpos_tag}.json"
+  exp_name="bun_seq${SEQ_LEN}_k${k}_nq${N_EPISODES}_seed${SEED}_t${THINKING}_p${PREFIX_QUESTION}_${_qt_tag}${_tpos_tag}${_mt_tag}"
 
   if [[ ! -f "$GEN_JSON" ]] || [[ "$REWRITE_DATA_CACHE" -eq 1 ]]; then
     if [[ -n "$BUNDLE_SIZE" ]]; then
@@ -186,6 +205,7 @@ for k in $(seq "$K_START" "$K_END"); do
         --n_episodes \"${N_EPISODES}\" \
         --target_question_type \"${TARGET_QUESTION_TYPE}\" \
         --question_types ${QUESTION_TYPES} \
+        --target_step_strategy \"${TARGET_STEP_STRATEGY}\" \
         --seed \"${SEED}\" \
         --bundle_size \"${BUNDLE_SIZE}\""
     else
@@ -196,6 +216,7 @@ for k in $(seq "$K_START" "$K_END"); do
         --n_episodes \"${N_EPISODES}\" \
         --target_question_type \"${TARGET_QUESTION_TYPE}\" \
         --question_types ${QUESTION_TYPES} \
+        --target_step_strategy \"${TARGET_STEP_STRATEGY}\" \
         --seed \"${SEED}\""
     fi
   else
@@ -218,7 +239,7 @@ for k in $(seq "$K_START" "$K_END"); do
       --semaphore_limit \"${SEMAPHORE_LIMIT}\" \
       --batch_size \"${BATCH_SIZE}\" \
       --output_csv \"${raw_csv}\" \
-      ${_pf} ${_tf}"
+      ${_pf} ${_tf} ${_mt_arg}"
   else
     echo "Inference CSV exists, skipping: $raw_csv"
   fi
