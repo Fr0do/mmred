@@ -66,3 +66,21 @@ python scripts/utils/parse_answers.py --exp_name EXP_NAME --input_dir path/to/in
 ```
 
 You can then use the CSV file to compute evaluation metrics.
+
+
+## MERA Evaluation With MLflow
+
+`scripts/run_mera_mlflow.py` runs the MMReD MERA/lm-eval task configs and logs the run to MLflow. It stores the raw harness result JSON, sample logs, git state, package versions, and GPU diagnostics as MLflow artifacts.
+
+```bash
+CUDA_VISIBLE_DEVICES=3 python scripts/run_mera_mlflow.py \
+    --tasks mmred \
+    --model vllm-vlm \
+    --model-args pretrained=google/t5gemma-2-270m-270m,trust_remote_code=True,enforce_eager=True,gpu_memory_utilization=0.3,max_model_len=4096 \
+    --gen-kwargs temperature=0.0,do_sample=False,max_gen_toks=100 \
+    --limit 1 \
+    --mlflow-tracking-uri file:///workspace-SR004.nfs2/kurkin/mlruns \
+    --mlflow-experiment mera-mmred
+```
+
+The script registers `/workspace-SR004.nfs2/kurkin/vllm-t5gemma2-plugin` by default before running lm-eval. Use `--limit -1` for a full run after the smoke test passes.

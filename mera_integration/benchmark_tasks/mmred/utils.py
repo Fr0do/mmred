@@ -142,25 +142,31 @@ def extract_answer(text: str, atype: str = "person") -> str:
     return normalize_answer(answer or "", atype)
 
 
-def extract_answer_filter(resps, docs):
-    """Filter function for lm-evaluation-harness.
-    
-    Extracts answers from model responses.
-    
-    Args:
-        resps: List of model responses (each is a list with one response)
-        docs: List of document dictionaries
-        
-    Returns:
-        List of extracted answer strings
-    """
-    extracted = []
-    for resp, doc in zip(resps, docs):
-        text = resp[0] if isinstance(resp, list) else resp
-        atype = doc.get("meta", {}).get("atype", "person")
-        answer = extract_answer(text, atype)
-        extracted.append([answer])  # Keep as list for pipeline
-    return extracted
+class ExtractAnswerFilter:
+    """lm-eval filter that extracts normalized short answers."""
+
+    def apply(self, resps, docs):
+        """Extract answers from model responses.
+
+        Args:
+            resps: List of model responses (each is a list with one response)
+            docs: List of document dictionaries
+
+        Returns:
+            List of extracted answer strings.
+        """
+        extracted = []
+        for resp, doc in zip(resps, docs):
+            text = resp[0] if isinstance(resp, list) else resp
+            atype = doc.get("meta", {}).get("atype", "person")
+            answer = extract_answer(text, atype)
+            extracted.append([answer])  # Keep as list for pipeline
+        return extracted
+
+
+def extract_answer_filter():
+    """Filter factory for lm-evaluation-harness YAML !function usage."""
+    return ExtractAnswerFilter()
 
 
 # ============================================================================
