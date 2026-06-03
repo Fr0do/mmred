@@ -1,0 +1,6 @@
+group: mmred_sparse
+group_alias: MMReD sparse context (text)
+task:
+  - mmred_sparse_bundle_seq16_k1_tposrandom
+  - mmred_sparse_bundle_seq16_k8_tposrandom
+  - mmred_sparse_qsplit_seq16_k8

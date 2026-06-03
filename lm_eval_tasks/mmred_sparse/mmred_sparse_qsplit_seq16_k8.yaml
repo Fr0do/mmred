@@ -1,0 +1,9 @@
+include: mmred_sparse_base.yaml
+task: mmred_sparse_qsplit_seq16_k8
+dataset_kwargs:
+  data_files:
+    train: data/lm_eval/mmred_qsplit/seq16_k8_seed12345/test.jsonl
+metadata:
+  benchmark: question_split
+  seq_len: 16
+  split_k: 8

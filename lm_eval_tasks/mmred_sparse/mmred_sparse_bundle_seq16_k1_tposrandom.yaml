@@ -1,0 +1,10 @@
+include: mmred_sparse_base.yaml
+task: mmred_sparse_bundle_seq16_k1_tposrandom
+dataset_kwargs:
+  data_files:
+    train: data/lm_eval/mmred_bundle/seq16_k1_seed12345_tposrandom/test.jsonl
+metadata:
+  benchmark: sequence_bundle
+  seq_len: 16
+  k_target: 1
+  target_step_strategy: random
