@@ -159,8 +159,10 @@ def q_first_at_room(
         df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
         a, step_idx = _check_df_return_answer(df)
 
+    # "last to appear" would read as the most recent arrival, which can differ
+    # from the occupant of the room's last occupied step; phrase it as "seen last"
     q = (
-        f"Who was the last to appear in the {room}?"
+        f"Who was the last person seen in the {room}?"
         if inv
         else f"Who was the first to appear in the {room}?"
     )
@@ -175,7 +177,7 @@ def q_first_at_room(
 
 
 def q_last_at_room(seq_len: int, **kwargs) -> QuestionResult:
-    """Who was the last to appear in the [Room]?"""
+    """Who was the last person seen in the [Room]?"""
     return q_first_at_room(seq_len, inv=True, **kwargs)
 
 
@@ -753,15 +755,21 @@ def q_crowd_count(
     rng: random.Random = None,
     **kwargs,
 ) -> QuestionResult:
-    """How many times did a crowd ([three] or more people in one room) appear [between frames X and Y]?"""
+    """For how many steps was there a crowd ([three] or more people in one room) [between frames X and Y]?
+
+    Counts steps on which at least one room is crowded. Phrased as a duration
+    ("for how many steps") rather than an event count ("how many times did a
+    crowd appear"): the latter reads as counting empty->crowded transitions,
+    which diverges from this computation whenever a crowd persists.
+    """
     chars = chars or DEFAULT_CHARS
     rooms = rooms or DEFAULT_ROOMS
     rng = rng or random
-    
+
     df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
     _, _, frame_0, frame_1, q_end = get_random_mmlong(seq_len, fraction, rng=rng)
-    
-    # Count crowds and track where they occurred
+
+    # Track crowded rooms per step for metadata
     crowd_steps = {}
     for step_id in range(frame_0 + 1, frame_1 + 2):
         row = df.iloc[step_id - 1]
@@ -769,18 +777,10 @@ def q_crowd_count(
         crowded_rooms = ur[urc >= n_crowd].tolist()
         if crowded_rooms:
             crowd_steps[step_id] = crowded_rooms
-    
-    a = sum(len(r) for r in crowd_steps.values())  # Total crowd occurrences
-    
-    # Recompute using original method to match
-    a = (
-        df.iloc[frame_0 : frame_1 + 1]
-        .apply(lambda x: np.sum(np.unique(x, return_counts=True)[1] >= n_crowd), axis=1)
-        .sum()
-        .item()
-    )
-    
-    q = f"How many times did a crowd ({n_crowd} or more people in one room) appear{q_end}"
+
+    a = len(crowd_steps)  # Number of steps with at least one crowded room
+
+    q = f"For how many steps was there a crowd ({n_crowd} or more people in one room){q_end}"
     
     # Metadata: steps with crowded rooms
     relevant_map = crowd_steps

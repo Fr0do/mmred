@@ -148,11 +148,11 @@ class Language:
             room = m.group(1)
             return f"Кто первым появился {_prep_room(room)}?"
 
-        # "Who was the last to appear in the {room}?"
-        m = re.fullmatch(rf"Who was the last to appear in the ({rooms_pattern})\?", question)
+        # "Who was the last person seen in the {room}?"
+        m = re.fullmatch(rf"Who was the last person seen in the ({rooms_pattern})\?", question)
         if m:
             room = m.group(1)
-            return f"Кто последним появился {_prep_room(room)}?"
+            return f"Кого последним видели {_prep_room(room)}?"
 
         # "Who was in the {room_0} when {char} first appeared in the {room_1}?"
         m = re.fullmatch(
@@ -313,15 +313,19 @@ class Language:
             suffix = _translate_suffix(m.group(2))
             return f"Сколько разных комнат посетил(а) {c}{suffix}"
 
-        # "How many times did a crowd ({N} or more people in one room) appear{suffix}"
+        # "For how many steps was there a crowd ({N} or more people in one room){suffix}"
         m = re.fullmatch(
-            rf"How many times did a crowd \((\d+) or more people in one room\) appear( between steps \d+ and \d+\?|\?)",
+            rf"For how many steps was there a crowd \((\d+) or more people in one room\)( between steps \d+ and \d+\?|\?)",
             question,
         )
         if m:
             n_crowd = m.group(1)
             suffix = _translate_suffix(m.group(2))
-            return f"Сколько раз возникала толпа ({n_crowd} или более человек в одной комнате){suffix}"
+            return f"Сколько шагов существовала толпа ({n_crowd} или более человек в одной комнате){suffix}"
 
-        # Fallback: return original question if no pattern matched
+        # Fallback: no pattern matched — the English template would leak through,
+        # so make it loud instead of silently producing mixed-language data
+        import warnings
+
+        warnings.warn(f"translate_question: no RU pattern matched for: {question!r}")
         return question
