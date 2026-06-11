@@ -67,37 +67,34 @@ DC_TASKS = ['spend_alone', 'steps_in_room', 'crowd_count', 'where_spend', 'who_s
 # MERA leaderboard sequence lengths
 MERA_SEQ_LENGTHS = [32, 64, 128]
 
-# Few-shot example lengths (shorter contexts for demonstration)
-FEW_SHOT_SEQ_LENGTHS = [1, 2, 4, 8, 16]
+# Few-shot example lengths: short enough to keep prompts compact, long
+# enough that aggregation questions are non-degenerate (1-4 steps make
+# spend/alone questions trivial or ill-posed)
+FEW_SHOT_SEQ_LENGTHS = [8, 16]
 
 
 def format_sequence_as_text(sequence: list[dict], language: str = "en") -> str:
-    """Format sequence data as text context.
-    
+    """Format sequence data as a JSONL context (one JSON object per step).
+
+    Matches the library's serialize_sequence Step schema
+    ({"step_id": N, "rooms": {room: [chars]}}) — the paper's original
+    representation. The language argument is kept for API compatibility;
+    room/character names arrive already localized.
+
     Args:
         sequence: List of step dictionaries with rooms and occupants
-        language: Language for formatting ("en" or "ru")
-        
+        language: Unused (names are pre-localized)
+
     Returns:
-        Formatted text representation of the sequence
+        JSONL string, one step object per line
     """
-    lines = []
-    for step in sequence:
-        step_id = step["step_id"]
-        room_parts = []
-        for room, occupants in step["rooms"].items():
-            if occupants:
-                occupants_str = ", ".join(occupants)
-                room_parts.append(f"{room}: [{occupants_str}]")
-            else:
-                room_parts.append(f"{room}: []")
-        
-        if language == "ru":
-            lines.append(f"Шаг {step_id}: " + "; ".join(room_parts))
-        else:
-            lines.append(f"Step {step_id}: " + "; ".join(room_parts))
-    
-    return "\n".join(lines)
+    return "\n".join(
+        json.dumps(
+            {"step_id": step["step_id"], "rooms": step["rooms"]},
+            ensure_ascii=False,
+        )
+        for step in sequence
+    )
 
 
 def get_instruction_prompt(language: str = "en", mode: str = "text") -> str:
@@ -118,7 +115,7 @@ def get_instruction_prompt(language: str = "en", mode: str = "text") -> str:
             "Последовательность изображений показывает расположение персонажей "
             "в комнатах на каждом шаге."
             if mode == "image"
-            else "Последовательность шагов показывает, какие персонажи находятся в каких комнатах."
+            else "Последовательность шагов в формате JSON показывает, какие персонажи находятся в каких комнатах."
         )
         return (
             "Задача:\n"
@@ -136,7 +133,7 @@ def get_instruction_prompt(language: str = "en", mode: str = "text") -> str:
     context_intro = (
         "The image sequence shows character positions in rooms at each step."
         if mode == "image"
-        else "The step sequence shows which characters are located in which rooms."
+        else "The JSON step sequence shows which characters are located in which rooms."
     )
     return (
         "Task:\n"
