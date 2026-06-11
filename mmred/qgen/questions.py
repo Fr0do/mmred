@@ -573,7 +573,7 @@ def q_who_spend(
         df = generate_sequence_df(seq_len, chars=chars, rooms=rooms, rng=rng)
         a = _check_df_return_answer(df.iloc[frame_0 : frame_1 + 1])
 
-    q = f"Who spent the {q_start} time alone in the {room}{q_end}"
+    q = f"Who spent the {q_start} time in the {room}{q_end}"
     
     # Metadata: all steps in range, the queried room
     relevant_map = {step_id: [room] for step_id in range(frame_0 + 1, frame_1 + 2)}

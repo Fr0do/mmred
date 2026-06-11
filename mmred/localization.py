@@ -261,16 +261,16 @@ class Language:
             suffix = _translate_suffix(m.group(2))
             return f"Какая комната была переполнена ({n_crowd} или более человек) наибольшее количество шагов{suffix}"
 
-        # "Who spent the {most/least amount of} time alone in the {room}{suffix}"
+        # "Who spent the {most/least amount of} time in the {room}{suffix}"
         m = re.fullmatch(
-            rf"Who spent the (most|least amount of) time alone in the ({rooms_pattern})( between steps \d+ and \d+\?|\?)",
+            rf"Who spent the (most|least amount of) time in the ({rooms_pattern})( between steps \d+ and \d+\?|\?)",
             question,
         )
         if m:
             comp = "больше всего" if m.group(1) == "most" else "меньше всего"
             room = m.group(2)
             suffix = _translate_suffix(m.group(3))
-            return f"Кто провёл {comp} времени в одиночестве {_prep_room(room)}{suffix}"
+            return f"Кто провёл {comp} времени {_prep_room(room)}{suffix}"
 
         # "Who spent the {most/least amount of} time alone in the rooms{suffix}"
         m = re.fullmatch(

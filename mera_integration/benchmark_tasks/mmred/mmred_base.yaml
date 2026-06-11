@@ -8,7 +8,7 @@ test_split: test
 # Prompt formatting
 doc_to_text: "{{instruction.format(**inputs).strip()}}"
 doc_to_target: "outputs"
-target_delimiter: "\nAnswer: "
+target_delimiter: "\nОтвет: "
 
 # Multimodal: image loading (uncomment for VLM evaluation)
 # doc_to_image: !function utils.doc_to_image
@@ -18,7 +18,8 @@ generation_kwargs:
   do_sample: false
   max_gen_toks: 8192
   until:
-    - "\nQuestion:"
+    - "\nВопрос:"
+    - "\nЗадача:"
 
 # Answer extraction filters
 filter_list:

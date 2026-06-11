@@ -101,49 +101,55 @@ def format_sequence_as_text(sequence: list[dict], language: str = "en") -> str:
 
 
 def get_instruction_prompt(language: str = "en", mode: str = "text") -> str:
-    """Get the instruction prompt for the task.
-    
+    """Get a SAP-formatted instruction prompt for the task.
+
+    Follows MERA docs/dataset_formatting.md: semantic blocks
+    Задача / Контекст / Формат ответа / Вопрос / Ответ.
+
     Args:
         language: Language for the prompt ("en" or "ru")
         mode: Context mode ("text" or "image")
-        
+
     Returns:
         Instruction prompt string with {context} and {question} placeholders
     """
     if language == "ru":
-        if mode == "image":
-            return (
-                "Вы анализируете последовательность изображений, показывающих расположение персонажей "
-                "в разных комнатах на каждом шаге. Изучите изображения и ответьте на вопрос.\n\n"
-                "{context}\n\n"
-                "Вопрос: {question}\n\n"
-                "Ответьте одним словом или числом."
-            )
-        else:
-            return (
-                "Вы анализируете последовательность состояний комнат, где указано, "
-                "какие персонажи находятся в каких комнатах на каждом шаге.\n\n"
-                "{context}\n\n"
-                "Вопрос: {question}\n\n"
-                "Ответьте одним словом или числом."
-            )
-    else:
-        if mode == "image":
-            return (
-                "You are analyzing a sequence of images showing character positions "
-                "in different rooms at each step. Study the images and answer the question.\n\n"
-                "{context}\n\n"
-                "Question: {question}\n\n"
-                "Answer with a single word or number."
-            )
-        else:
-            return (
-                "You are analyzing a sequence of room occupancy states showing "
-                "which characters are in which rooms at each step.\n\n"
-                "{context}\n\n"
-                "Question: {question}\n\n"
-                "Answer with a single word or number."
-            )
+        context_intro = (
+            "Последовательность изображений показывает расположение персонажей "
+            "в комнатах на каждом шаге."
+            if mode == "image"
+            else "Последовательность шагов показывает, какие персонажи находятся в каких комнатах."
+        )
+        return (
+            "Задача:\n"
+            "Проанализируй перемещения и расположение персонажей по шагам.\n\n"
+            "Контекст:\n"
+            f"{context_intro}\n"
+            "{context}\n\n"
+            "Формат ответа:\n"
+            "Ответь одним словом или одним числом в формате: Ответ: X\n\n"
+            "Вопрос:\n"
+            "{question}\n\n"
+            "Ответ:"
+        )
+
+    context_intro = (
+        "The image sequence shows character positions in rooms at each step."
+        if mode == "image"
+        else "The step sequence shows which characters are located in which rooms."
+    )
+    return (
+        "Task:\n"
+        "Analyze the character movements and room positions across the steps.\n\n"
+        "Context:\n"
+        f"{context_intro}\n"
+        "{context}\n\n"
+        "Answer format:\n"
+        "Answer with one word or one number using the format: Answer: X\n\n"
+        "Question:\n"
+        "{question}\n\n"
+        "Answer:"
+    )
 
 
 def convert_to_mera_format(
